@@ -1,0 +1,885 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>סקר התושבים — נופי פרת</title>
+  <meta name="description" content="סקר התושבים השנתי של נופי פרת — הדעה שלך קובעת">
+  <meta name="theme-color" content="#F6EEDF">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌿</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&family=Suez+One&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js"></script>
+  <script src="utils.js"></script>
+  <script src="survey-data.js"></script>
+</head>
+<body>
+
+<div class="loading-screen" id="loadingScreen">
+  <div>
+    <div class="spinner"></div>
+    <p class="center muted" id="loadingText">רק רגע…</p>
+  </div>
+</div>
+
+<header class="topbar" id="topbar">
+  <div class="topbar-in">
+    <a class="brand" href="#" onclick="goHome(); return false;">
+      <span class="brand-dot"></span>
+      <span>נופי פרת</span>
+    </a>
+    <div class="spacer"></div>
+    <div class="progress-rail" aria-hidden="true"><div class="progress-fill" id="progressFill"></div></div>
+    <span class="progress-label" id="progressLabel"></span>
+    <button class="topbar-btn" onclick="showLaterModal()" title="שמירה והמשך אחר־כך">🔖 <span class="later-txt">אמשיך אחר־כך</span></button>
+    <button class="topbar-btn" onclick="showFaq()" aria-label="שאלות ותשובות">❓</button>
+  </div>
+</header>
+
+<main class="wrap" id="app" aria-live="polite"></main>
+
+<script>
+/* ============================================================
+   סקר נופי פרת — v2
+   זרימה: נחיתה → קטגוריות → (פרופיל חד-פעמי) → פרק → הפרק הבא
+   ============================================================ */
+
+const S = {
+  survey: null,
+  done: {},                // chapterId → ISO timestamp
+  serverMode: false,
+  raffleEntered: false,
+  pendingChapter: null,    // לאן ממשיכים אחרי הפרופיל
+};
+
+const DONE_KEY = 'np_done';
+const RAFFLE_KEY = 'np_raffle_entered';
+const draftKey = (ch) => 'np_draft_' + ch;
+
+init();
+
+async function init() {
+  S.done = JSON.parse(localStorage.getItem(DONE_KEY) || '{}');
+  S.raffleEntered = localStorage.getItem(RAFFLE_KEY) === 'yes';
+  S.serverMode = !isLocalMode();
+
+  if (S.serverMode) {
+    warmupServer();
+    try {
+      const res = await apiCall('getSurvey');
+      if (res.success && res.survey && res.survey.chapters) S.survey = res.survey;
+    } catch (e) { /* fallback מקומי */ }
+  }
+  if (!S.survey) S.survey = window.SURVEY_DATA;
+
+  document.getElementById('loadingScreen').classList.add('hidden');
+  goHome();
+}
+
+// ── עזרי מצב ─────────────────────────────────────────────
+
+function getDraft(chId) {
+  try { return JSON.parse(localStorage.getItem(draftKey(chId)) || '{}'); }
+  catch { return {}; }
+}
+
+function setDraft(chId, answers) {
+  localStorage.setItem(draftKey(chId), JSON.stringify(answers));
+}
+
+function allAnswers() {
+  const out = {};
+  for (const ch of S.survey.chapters) Object.assign(out, getDraft(ch.id));
+  return out;
+}
+
+function visibleChapters() {
+  const ans = allAnswers();
+  return S.survey.chapters.filter(ch => evalCond(ch.showIf, ans));
+}
+
+function catChapters(catId) {
+  return visibleChapters().filter(ch => ch.cat === catId);
+}
+
+function chapterState(ch) {
+  if (S.done[ch.id]) return 'done';
+  return Object.keys(getDraft(ch.id)).length ? 'partial' : 'new';
+}
+
+function completionStats() {
+  const vis = visibleChapters();
+  const done = vis.filter(ch => S.done[ch.id]).length;
+  return { done, total: vis.length, complete: done === vis.length && vis.length > 0 };
+}
+
+function hasStarted() {
+  return Object.keys(S.done).length > 0 || Object.keys(getDraft('about')).length > 0;
+}
+
+function profileDone() { return !!S.done['about']; }
+
+function catOf(ch) {
+  return S.survey.meta.categories.find(c => c.id === ch.cat) || null;
+}
+
+function updateProgress() {
+  const { done, total } = completionStats();
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressLabel').textContent = hasStarted() ? done + '/' + total : '';
+}
+
+function setView(node, hue) {
+  const app = document.getElementById('app');
+  app.className = 'wrap' + (hue ? ' hue-' + hue : '');
+  app.replaceChildren(node);
+  node.classList.add('fade-in');
+  window.scrollTo({ top: 0, behavior: 'instant' });
+  updateProgress();
+}
+
+function goHome() {
+  if (hasStarted()) goCategories(); else goLanding();
+}
+
+// ── מסך נחיתה ────────────────────────────────────────────
+
+function goLanding() {
+  const m = S.survey.meta;
+  const view = el('div', { class: 'land' },
+    sceneSvg(),
+    el('h1', {}, m.title, el('span', { class: 'yishuv-name' }, m.yishuv)),
+    el('p', { class: 'tagline' }, m.tagline),
+    el('p', { class: 'subline' }, m.sub),
+    el('div', { class: 'land-raffle' }, '🎁', el('span', {}, m.raffle.text)),
+    el('div', { class: 'land-cta' },
+      el('button', { class: 'btn btn-primary', onclick: goCategories }, 'מתחילים ←'),
+      el('button', { class: 'btn btn-ghost btn-sm', onclick: showResumeByPhone }, 'כבר התחלתי במכשיר אחר')
+    )
+  );
+  setView(view);
+}
+
+// נוף ואדי פרת — סצנת הפתיחה
+function sceneSvg() {
+  const d = el('div', { class: 'land-scene', 'aria-hidden': 'true' });
+  d.innerHTML = `<svg viewBox="0 0 640 250" xmlns="http://www.w3.org/2000/svg" role="img">
+    <defs>
+      <linearGradient id="skyG" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#F9F1DF"/><stop offset="1" stop-color="#F3E5C8"/>
+      </linearGradient>
+      <linearGradient id="hill1" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#9FBCC4"/><stop offset="1" stop-color="#B9CFD4"/>
+      </linearGradient>
+      <linearGradient id="hill2" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#8FA050"/><stop offset="1" stop-color="#A8B56C"/>
+      </linearGradient>
+      <linearGradient id="hill3" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#2E6B4F"/><stop offset="1" stop-color="#3E7D5F"/>
+      </linearGradient>
+      <linearGradient id="duneG" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#D8935F"/><stop offset="1" stop-color="#C9603B"/>
+      </linearGradient>
+    </defs>
+    <rect width="640" height="250" fill="url(#skyG)"/>
+    <circle cx="512" cy="66" r="34" fill="#E9B84E"/>
+    <circle cx="512" cy="66" r="46" fill="#E9B84E" opacity=".25"/>
+    <path d="M96 60q7-2 9-9 2 7 9 9-7 2-9 9-2-7-9-9z" fill="#C9603B" opacity=".55"/>
+    <path d="M0 168 Q90 96 190 138 T400 128 T640 150 V250 H0 Z" fill="url(#hill1)"/>
+    <path d="M0 190 Q120 120 250 162 T520 150 T640 170 V250 H0 Z" fill="url(#hill2)"/>
+    <path d="M0 215 Q140 150 300 190 T640 196 V250 H0 Z" fill="url(#hill3)"/>
+    <path d="M-10 250 Q170 236 320 244 T650 240 V250 Z" fill="#7FB6C4"/>
+    <path d="M-10 250 Q170 240 320 247 T650 244 V250 Z" fill="#A9D0DA" opacity=".7"/>
+    <path d="M0 250 Q110 210 260 232 T640 226 V250 H0 Z" fill="url(#duneG)" opacity=".92"/>
+    <g fill="#1C4A35">
+      <circle cx="118" cy="212" r="11"/><rect x="116" y="218" width="4" height="13" rx="2"/>
+      <circle cx="150" cy="220" r="8"/><rect x="148.5" y="225" width="3" height="10" rx="1.5"/>
+      <circle cx="470" cy="206" r="10"/><rect x="468" y="212" width="4" height="12" rx="2"/>
+    </g>
+    <path d="M360 84q6 6 12 0M382 92q5 5 10 0" stroke="#6B7A5A" stroke-width="2.4" fill="none" stroke-linecap="round"/>
+  </svg>`;
+  return d;
+}
+
+// ── מסך קטגוריות ─────────────────────────────────────────
+
+function goCategories() {
+  const m = S.survey.meta;
+  const stats = completionStats();
+
+  const kids = [
+    el('div', { class: 'screen-head' },
+      el('h2', {}, 'במה מתחילים?'),
+      el('span', { class: 'rule', 'aria-hidden': 'true' })
+    ),
+  ];
+
+  // פס הגרלה
+  if (stats.complete && !S.raffleEntered) {
+    kids.push(el('div', { class: 'raffle-strip' },
+      el('span', { class: 'emoji' }, '🎉'),
+      el('span', { class: 'txt' }, el('strong', {}, 'סיימתם הכול! '), 'ההגרלה מחכה לכם'),
+      el('button', { class: 'btn btn-accent btn-sm', onclick: showRaffleModal }, 'להרשמה')
+    ));
+  } else if (stats.complete && S.raffleEntered) {
+    kids.push(el('div', { class: 'raffle-strip' },
+      el('span', { class: 'emoji' }, '🎉'),
+      el('span', { class: 'txt' }, el('strong', {}, 'סיימתם ונרשמתם להגרלה'), ' — בהצלחה!')
+    ));
+  } else {
+    kids.push(el('div', { class: 'raffle-strip' },
+      el('span', { class: 'emoji' }, '🎁'),
+      el('span', { class: 'txt' },
+        stats.done > 0
+          ? el('span', {}, el('strong', {}, (stats.total - stats.done) + ' פרקים'), ' בינך לבין הגרלת ' + m.raffle.prize)
+          : el('span', {}, 'משלימים את הסקר ← נכנסים להגרלת ', el('strong', {}, m.raffle.prize))
+      )
+    ));
+  }
+
+  const grid = el('div', { class: 'cat-grid' });
+  m.categories.forEach(cat => {
+    const chs = catChapters(cat.id);
+    if (!chs.length) return;
+    const done = chs.filter(ch => S.done[ch.id]).length;
+    const allDone = done === chs.length;
+    grid.append(
+      el('button', { class: 'cat-card hue-' + cat.hue + (allDone ? ' cat-done' : ''), onclick: () => goCategory(cat.id) },
+        allDone ? el('span', { class: 'cat-done-badge' }, '✓') : null,
+        el('span', { class: 'cat-icon' }, cat.icon),
+        el('span', { class: 'cat-title' }, cat.title),
+        el('span', { class: 'cat-meta' }, done + '/' + chs.length + ' נושאים'),
+        el('span', { class: 'cat-prog' }, el('span', { style: 'display:block; width:' + (chs.length ? Math.round((done / chs.length) * 100) : 0) + '%' }))
+      )
+    );
+  });
+  kids.push(grid);
+
+  setView(el('div', {}, ...kids));
+}
+
+// ── מסך קטגוריה ──────────────────────────────────────────
+
+function goCategory(catId) {
+  const cat = S.survey.meta.categories.find(c => c.id === catId);
+  if (!cat) return goCategories();
+  const chs = catChapters(catId);
+  const next = chs.find(ch => !S.done[ch.id]);
+
+  const list = el('div', { class: 'chap-list' });
+  chs.forEach(ch => {
+    const st = chapterState(ch);
+    const stText = { done: '✓', partial: 'באמצע', new: (visibleQuestionCount(ch)) + ' שאלות' }[st];
+    list.append(
+      el('button', { class: 'chap-row is-' + st, onclick: () => startChapter(ch.id) },
+        el('span', { class: 'ch-icon' }, ch.icon || '📋'),
+        el('span', { class: 'ch-body' },
+          el('span', { class: 'ch-title', text: ch.title }),
+          ch.desc ? el('span', {}, el('br'), el('span', { class: 'ch-meta', text: ch.desc })) : null
+        ),
+        el('span', { class: 'ch-status' }, stText)
+      )
+    );
+  });
+
+  const view = el('div', {},
+    el('div', { class: 'cat-hero' },
+      el('span', { class: 'cat-icon' }, cat.icon),
+      el('div', {},
+        el('h2', {}, cat.title),
+        el('p', {}, chs.filter(c => S.done[c.id]).length + '/' + chs.length + ' נושאים הושלמו')
+      )
+    ),
+    next ? el('button', { class: 'btn btn-primary btn-block mb', onclick: () => startChapter(next.id) },
+      (S.done[chs[0]?.id] || Object.keys(S.done).length ? 'לנושא הבא: ' : 'מתחילים: ') + next.title + ' ←') : null,
+    list,
+    el('div', { class: 'mt center' },
+      el('button', { class: 'btn btn-ghost btn-sm', onclick: goCategories }, 'לכל התחומים')
+    )
+  );
+  setView(view, cat.hue);
+}
+
+function visibleQuestionCount(ch) {
+  const ans = allAnswers();
+  return ch.questions.filter(q => evalCond(q.showIf, ans)).length;
+}
+
+// ── שער הפרופיל (חד-פעמי) ────────────────────────────────
+
+function startChapter(chId) {
+  if (!profileDone() && chId !== 'about') {
+    S.pendingChapter = chId;
+    goProfile();
+    return;
+  }
+  goChapter(chId);
+}
+
+function goProfile() {
+  const ch = S.survey.chapters.find(c => c.id === 'about');
+  const answers = getDraft('about');
+
+  const qWrap = el('div', {});
+  ch.questions.forEach(q => qWrap.append(renderQuestion(ch, q, answers)));
+
+  const view = el('div', {},
+    el('div', { class: 'chapter-header' },
+      el('span', { class: 'ch-icon' }, ch.icon),
+      el('div', {},
+        el('h2', {}, ch.title),
+        el('p', { class: 'ch-desc' }, ch.desc)
+      )
+    ),
+    qWrap,
+    el('div', { class: 'chapter-nav' },
+      el('button', { class: 'btn btn-primary', id: 'submitBtn', onclick: () => submitChapter(ch) }, 'שומרים וממשיכים ←')
+    )
+  );
+  setView(view, 'green');
+  refreshVisibility(ch);
+}
+
+// ── מסך פרק ──────────────────────────────────────────────
+
+function goChapter(chId) {
+  const ch = S.survey.chapters.find(c => c.id === chId);
+  if (!ch) return goCategories();
+  const cat = catOf(ch);
+  const chs = ch.cat ? catChapters(ch.cat) : [];
+  const pos = chs.indexOf(ch);
+
+  const answers = getDraft(chId);
+  const container = el('div', {});
+
+  container.append(
+    el('div', { class: 'chapter-header' },
+      el('span', { class: 'ch-icon' }, ch.icon || '📋'),
+      el('div', {},
+        el('h2', {}, ch.title),
+        ch.desc ? el('p', { class: 'ch-desc' }, ch.desc) : null
+      )
+    )
+  );
+  if (cat && pos >= 0) {
+    container.append(el('p', { class: 'chapter-pos' }, cat.icon + ' ' + cat.title + ' · נושא ' + (pos + 1) + ' מתוך ' + chs.length));
+  }
+
+  const qWrap = el('div', {});
+  ch.questions.forEach(q => qWrap.append(renderQuestion(ch, q, answers)));
+  container.append(qWrap);
+
+  container.append(
+    el('div', { class: 'chapter-nav' },
+      el('button', { class: 'btn btn-ghost', onclick: () => ch.cat ? goCategory(ch.cat) : goCategories() }, '↩'),
+      el('button', { class: 'btn btn-primary', id: 'submitBtn', onclick: () => submitChapter(ch) },
+        S.done[chId] ? 'עדכון ← והלאה' : 'שמירה ← והלאה')
+    )
+  );
+
+  setView(container, cat ? cat.hue : 'green');
+  refreshVisibility(ch);
+}
+
+function refreshVisibility(ch) {
+  const ans = Object.assign(allAnswers(), getDraft(ch.id));
+  ch.questions.forEach(q => {
+    const node = document.getElementById('q_' + q.id);
+    if (node) node.classList.toggle('hidden-q', !evalCond(q.showIf, ans));
+  });
+}
+
+function saveAnswer(ch, qId, value) {
+  const answers = getDraft(ch.id);
+  if (value === '' || value === null || (Array.isArray(value) && !value.length)) delete answers[qId];
+  else answers[qId] = value;
+  setDraft(ch.id, answers);
+  refreshVisibility(ch);
+}
+
+// ── רכיבי שאלות ─────────────────────────────────────────
+
+function renderQuestion(ch, q, answers) {
+  const card = el('div', { class: 'q-card', id: 'q_' + q.id });
+  card.append(el('p', { class: 'q-text' }, q.text));
+  if (q.help) card.append(el('p', { class: 'q-help' }, q.help));
+  const body = el('div', { class: 'q-body' });
+
+  switch (q.type) {
+    case 'scale':    body.append(renderScale(ch, q, answers)); break;
+    case 'radio':    body.append(renderChoice(ch, q, answers, false)); break;
+    case 'checkbox': body.append(renderChoice(ch, q, answers, true)); break;
+    case 'text':     body.append(renderText(ch, q, answers, false)); break;
+    case 'textarea': body.append(renderText(ch, q, answers, true)); break;
+    case 'number':   body.append(renderNumber(ch, q, answers)); break;
+    case 'rank':     body.append(renderRank(ch, q, answers)); break;
+  }
+  card.append(body);
+  return card;
+}
+
+function renderScale(ch, q, answers) {
+  const wrap = el('div', {});
+  const grid = el('div', { class: 'scale-grid', role: 'radiogroup', 'aria-label': q.text });
+  for (let v = q.min || 1; v <= (q.max || 10); v++) {
+    const chip = el('button', {
+      class: 'scale-chip' + (answers[q.id] === v ? ' sel' : ''),
+      type: 'button', role: 'radio', 'aria-checked': answers[q.id] === v ? 'true' : 'false',
+      onclick: () => {
+        const already = answers[q.id] === v;
+        answers[q.id] = already ? undefined : v;
+        grid.querySelectorAll('.scale-chip').forEach(c => { c.classList.remove('sel'); c.setAttribute('aria-checked', 'false'); });
+        if (!already) { chip.classList.add('sel'); chip.setAttribute('aria-checked', 'true'); }
+        saveAnswer(ch, q.id, already ? '' : v);
+      }
+    }, String(v));
+    grid.append(chip);
+  }
+  wrap.append(grid,
+    el('div', { class: 'scale-labels' },
+      el('span', {}, q.minLabel || ''),
+      el('span', {}, q.maxLabel || '')
+    ));
+  return wrap;
+}
+
+function renderChoice(ch, q, answers, multi) {
+  const wrap = el('div', { class: 'opt-list', role: multi ? 'group' : 'radiogroup', 'aria-label': q.text });
+  const opts = [...q.opts];
+  if (q.other) opts.push('אחר');
+  const OTHER_PREFIX = 'אחר: ';
+
+  const current = () => multi
+    ? (Array.isArray(answers[q.id]) ? answers[q.id] : [])
+    : answers[q.id];
+
+  const isSel = (opt) => {
+    const cur = current();
+    if (opt === 'אחר') {
+      return multi ? cur.some(v => v.startsWith(OTHER_PREFIX)) : (typeof cur === 'string' && cur.startsWith(OTHER_PREFIX));
+    }
+    return multi ? cur.includes(opt) : cur === opt;
+  };
+
+  let otherBox = null;
+
+  const rebuild = () => {
+    wrap.querySelectorAll('.opt').forEach(o => {
+      const opt = o.dataset.opt;
+      o.classList.toggle('sel', isSel(opt));
+      o.setAttribute('aria-checked', isSel(opt) ? 'true' : 'false');
+    });
+    if (otherBox) otherBox.style.display = isSel('אחר') ? '' : 'none';
+  };
+
+  opts.forEach(opt => {
+    const btn = el('button', {
+      class: 'opt ' + (multi ? 'check' : 'radio') + (isSel(opt) ? ' sel' : ''),
+      type: 'button', 'data-opt': opt,
+      role: multi ? 'checkbox' : 'radio', 'aria-checked': isSel(opt) ? 'true' : 'false',
+      onclick: () => {
+        if (multi) {
+          let cur = current().slice();
+          if (opt === 'אחר') {
+            if (isSel('אחר')) cur = cur.filter(v => !v.startsWith(OTHER_PREFIX));
+            else cur.push(OTHER_PREFIX);
+          } else if (q.exclusive && opt === q.exclusive) {
+            cur = isSel(opt) ? [] : [opt];
+          } else {
+            if (cur.includes(opt)) cur = cur.filter(v => v !== opt);
+            else { cur = cur.filter(v => v !== q.exclusive); cur.push(opt); }
+          }
+          answers[q.id] = cur;
+          saveAnswer(ch, q.id, cur);
+        } else {
+          const newVal = isSel(opt) ? '' : (opt === 'אחר' ? OTHER_PREFIX : opt);
+          answers[q.id] = newVal || undefined;
+          saveAnswer(ch, q.id, newVal);
+        }
+        rebuild();
+      }
+    },
+      el('span', { class: 'mark', 'aria-hidden': 'true' }),
+      el('span', {}, opt)
+    );
+    wrap.append(btn);
+  });
+
+  if (q.other) {
+    const getOtherText = () => {
+      const cur = current();
+      const v = multi ? (cur.find(x => x.startsWith(OTHER_PREFIX)) || '') : (typeof cur === 'string' && cur.startsWith(OTHER_PREFIX) ? cur : '');
+      return v ? v.slice(OTHER_PREFIX.length) : '';
+    };
+    const input = el('input', {
+      class: 'txt-input', placeholder: 'פרטו…', value: getOtherText(),
+      oninput: (e) => {
+        const txt = OTHER_PREFIX + e.target.value;
+        if (multi) {
+          let cur = current().filter(v => !v.startsWith(OTHER_PREFIX));
+          cur.push(txt);
+          answers[q.id] = cur;
+          saveAnswer(ch, q.id, cur);
+        } else {
+          answers[q.id] = txt;
+          saveAnswer(ch, q.id, txt);
+        }
+      }
+    });
+    otherBox = el('div', { class: 'other-input', style: isSel('אחר') ? '' : 'display:none' }, input);
+    wrap.append(otherBox);
+  }
+
+  return wrap;
+}
+
+function renderText(ch, q, answers, long) {
+  const input = el(long ? 'textarea' : 'input', {
+    class: 'txt-input', placeholder: long ? 'כתבו כאן…' : (q.help === 'רשות' ? 'רשות' : ''),
+    'aria-label': q.text,
+    oninput: (e) => saveAnswer(ch, q.id, e.target.value.trim())
+  });
+  input.value = answers[q.id] || '';
+  return input;
+}
+
+function renderNumber(ch, q, answers) {
+  const input = el('input', {
+    class: 'num-input', type: 'number', inputmode: 'numeric',
+    min: q.min ?? 0, max: q.max ?? 99, 'aria-label': q.text,
+    oninput: (e) => saveAnswer(ch, q.id, e.target.value === '' ? '' : Number(e.target.value))
+  });
+  input.value = answers[q.id] ?? '';
+  return input;
+}
+
+function renderRank(ch, q, answers) {
+  let order = Array.isArray(answers[q.id]) && answers[q.id].length === q.opts.length
+    ? answers[q.id].slice()
+    : q.opts.slice();
+
+  const list = el('div', { class: 'rank-list', role: 'list' });
+
+  const commit = () => {
+    answers[q.id] = order.slice();
+    saveAnswer(ch, q.id, order.slice());
+  };
+
+  const build = () => {
+    list.replaceChildren();
+    order.forEach((label, idx) => {
+      const item = el('div', { class: 'rank-item', role: 'listitem' },
+        el('span', { class: 'rank-num', 'aria-hidden': 'true' }),
+        el('span', { class: 'rank-label' }, label),
+        el('span', { class: 'rank-btns' },
+          el('button', {
+            type: 'button', 'aria-label': 'העבר את "' + label + '" למעלה', disabled: idx === 0,
+            onclick: (e) => { e.stopPropagation(); move(idx, idx - 1); }
+          }, '▲'),
+          el('button', {
+            type: 'button', 'aria-label': 'העבר את "' + label + '" למטה', disabled: idx === order.length - 1,
+            onclick: (e) => { e.stopPropagation(); move(idx, idx + 1); }
+          }, '▼')
+        ),
+        el('span', { class: 'rank-grip', 'aria-hidden': 'true' }, '⋮⋮')
+      );
+      attachDrag(item, idx);
+      list.append(item);
+    });
+  };
+
+  const move = (from, to) => {
+    if (to < 0 || to >= order.length) return;
+    const [x] = order.splice(from, 1);
+    order.splice(to, 0, x);
+    commit();
+    build();
+  };
+
+  const attachDrag = (item, idx) => {
+    item.addEventListener('pointerdown', (e) => {
+      if (e.target.closest('button')) return;
+      e.preventDefault();
+      item.setPointerCapture(e.pointerId);
+      item.classList.add('dragging');
+      const startY = e.clientY;
+      const h = item.offsetHeight + 8;
+      let currentIdx = idx;
+
+      const onMove = (ev) => {
+        const dy = ev.clientY - startY;
+        item.style.transform = 'translateY(' + dy + 'px)';
+        const shift = Math.round(dy / h);
+        currentIdx = Math.max(0, Math.min(order.length - 1, idx + shift));
+      };
+      const onUp = () => {
+        item.removeEventListener('pointermove', onMove);
+        item.removeEventListener('pointerup', onUp);
+        item.removeEventListener('pointercancel', onUp);
+        item.classList.remove('dragging');
+        item.style.transform = '';
+        if (currentIdx !== idx) move(idx, currentIdx);
+      };
+      item.addEventListener('pointermove', onMove);
+      item.addEventListener('pointerup', onUp);
+      item.addEventListener('pointercancel', onUp);
+    });
+  };
+
+  build();
+  return el('div', {}, list);
+}
+
+// ── הגשת פרק + המשך אוטומטי ─────────────────────────────
+
+async function submitChapter(ch) {
+  const btn = document.getElementById('submitBtn');
+  const answers = getDraft(ch.id);
+  const ctx = Object.assign(allAnswers(), answers);
+  const visAns = {};
+  ch.questions.forEach(q => {
+    if (evalCond(q.showIf, ctx) && answers[q.id] !== undefined) visAns[q.id] = answers[q.id];
+  });
+
+  // פרופיל מותר להגיש גם ריק (אנונימיות מלאה) — מסמנים שהוגש
+  if (ch.id === 'about') visAns.about_submitted = 'כן';
+
+  if (!Object.keys(visAns).length) {
+    showToast('ענו לפחות על שאלה אחת 🙂', 'warning');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'שומר…';
+
+  if (S.serverMode) {
+    try {
+      const res = await apiPost('submitChapter', { rid: getRid(), chapter: ch.id, answers: visAns });
+      if (!res.success) throw new Error(res.message || 'שגיאה בשמירה');
+    } catch (e) {
+      btn.disabled = false;
+      btn.textContent = 'שמירה ← והלאה';
+      showToast('השמירה נכשלה — בדקו חיבור ונסו שוב', 'error', 5000);
+      return;
+    }
+  }
+
+  setDraft(ch.id, visAns);
+  S.done[ch.id] = new Date().toISOString();
+  localStorage.setItem(DONE_KEY, JSON.stringify(S.done));
+
+  // לאן ממשיכים?
+  if (ch.id === 'about') {
+    const target = S.pendingChapter;
+    S.pendingChapter = null;
+    showToast('נשמר! 🙏', 'success', 1800);
+    if (target) return goChapter(target);
+    return goCategories();
+  }
+
+  const stats = completionStats();
+  if (stats.complete) {
+    celebrate();
+    goCategories();
+    if (!S.raffleEntered) setTimeout(showRaffleModal, 700);
+    return;
+  }
+
+  const next = ch.cat ? catChapters(ch.cat).find(c => !S.done[c.id]) : null;
+  if (next) {
+    showToast('נשמר! ממשיכים ← ' + next.title, 'success', 2200);
+    goChapter(next.id);
+  } else {
+    const cat = catOf(ch);
+    showToast(cat ? 'סיימתם את ' + cat.title + '! 🎉' : 'נשמר!', 'success', 2600);
+    goCategories();
+  }
+}
+
+// ── "אמשיך אחר־כך" + המשך לפי טלפון ─────────────────────
+
+async function hashPhone(phone) {
+  const digits = phone.replace(/[^0-9]/g, '');
+  const data = new TextEncoder().encode('np-salt-' + digits);
+  if (crypto.subtle) {
+    const buf = await crypto.subtle.digest('SHA-256', data);
+    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+  // fallback: FNV-1a
+  let h = 0x811c9dc5;
+  for (const b of data) { h ^= b; h = Math.imul(h, 0x01000193) >>> 0; }
+  return 'f' + h.toString(16);
+}
+
+function validPhone(p) {
+  return /^0\d{8,9}$/.test(p.replace(/[^0-9]/g, ''));
+}
+
+function showLaterModal() {
+  const phoneIn = el('input', { class: 'txt-input', placeholder: '05X-XXXXXXX', type: 'tel', inputmode: 'tel', 'aria-label': 'טלפון' });
+  const modal = el('div', { class: 'modal' },
+    el('h3', {}, '🔖 ממשיכים מתי שנוח'),
+    el('p', {}, 'ההתקדמות נשמרת אוטומטית במכשיר הזה — אפשר פשוט לסגור ולחזור.'),
+    el('p', {}, el('strong', {}, 'רוצים להמשיך ממכשיר אחר?'), ' השאירו טלפון ותוכלו להזדהות איתו שם. המספר לא מקושר לתשובות.'),
+    phoneIn,
+    el('div', { class: 'mt', style: 'display:flex; gap:8px' },
+      el('button', {
+        class: 'btn btn-primary', style: 'flex:1', onclick: async (e) => {
+          const phone = phoneIn.value.trim();
+          if (!validPhone(phone)) { showToast('בדקו את מספר הטלפון', 'warning'); return; }
+          if (!S.serverMode) { showToast('יעבוד אחרי חיבור המערכת לשרת', 'warning'); return; }
+          e.target.disabled = true;
+          try {
+            const res = await apiCall('linkResume', { hash: await hashPhone(phone), rid: getRid() });
+            if (!res.success) throw new Error(res.message);
+            closeModal();
+            showToast('מעולה! מכל מכשיר: "כבר התחלתי" + המספר שלכם', 'success', 4500);
+          } catch (err) {
+            e.target.disabled = false;
+            showToast(err.message || 'לא הצליח — נסו שוב', 'error');
+          }
+        }
+      }, 'שמירת טלפון'),
+      el('button', { class: 'btn btn-ghost', onclick: closeModal }, 'סגירה')
+    )
+  );
+  openModal(modal);
+}
+
+function showResumeByPhone() {
+  const phoneIn = el('input', { class: 'txt-input', placeholder: '05X-XXXXXXX', type: 'tel', inputmode: 'tel', 'aria-label': 'טלפון' });
+  const modal = el('div', { class: 'modal' },
+    el('h3', {}, 'ממשיכים מאיפה שעצרתם'),
+    el('p', {}, 'הזינו את הטלפון שהשארתם במכשיר הקודם:'),
+    phoneIn,
+    el('div', { class: 'mt', style: 'display:flex; gap:8px' },
+      el('button', {
+        class: 'btn btn-primary', style: 'flex:1', onclick: async (e) => {
+          const phone = phoneIn.value.trim();
+          if (!validPhone(phone)) { showToast('בדקו את מספר הטלפון', 'warning'); return; }
+          if (!S.serverMode) { showToast('יעבוד אחרי חיבור המערכת לשרת', 'warning'); return; }
+          e.target.disabled = true;
+          try {
+            const res = await apiCall('resumeByHash', { hash: await hashPhone(phone) });
+            if (!res.success) throw new Error(res.message);
+            setRid(res.rid);
+            S.done = {};
+            for (const [chId, data] of Object.entries(res.chapters || {})) {
+              S.done[chId] = data.ts || new Date().toISOString();
+              setDraft(chId, data.answers || {});
+            }
+            localStorage.setItem(DONE_KEY, JSON.stringify(S.done));
+            closeModal();
+            showToast('ברוכים השבים! 👋', 'success');
+            goCategories();
+          } catch (err) {
+            e.target.disabled = false;
+            showToast(err.message || 'לא מצאנו — בדקו את המספר', 'error');
+          }
+        }
+      }, 'המשך'),
+      el('button', { class: 'btn btn-ghost', onclick: closeModal }, 'סגירה')
+    )
+  );
+  openModal(modal);
+}
+
+// ── שו"ת ─────────────────────────────────────────────────
+
+function showFaq() {
+  closeDrawer();
+  const items = (S.survey.meta.faq || []).map(f =>
+    el('details', { class: 'faq-item' },
+      el('summary', {}, f.q),
+      el('p', {}, f.a)
+    ));
+  const drawer = el('aside', { class: 'drawer', id: 'faqDrawer', role: 'dialog', 'aria-label': 'שאלות ותשובות' },
+    el('h3', {}, 'שאלות? תשובות.'),
+    ...items,
+    el('button', { class: 'btn btn-ghost btn-block mt', onclick: closeDrawer }, 'סגירה')
+  );
+  const back = el('div', { class: 'drawer-back', id: 'drawerBack', onclick: closeDrawer });
+  document.body.append(back, drawer);
+}
+
+function closeDrawer() {
+  ['faqDrawer', 'drawerBack'].forEach(id => { const n = document.getElementById(id); if (n) n.remove(); });
+}
+
+// ── הגרלה ────────────────────────────────────────────────
+
+function showRaffleModal() {
+  const m = S.survey.meta.raffle;
+  const nameIn = el('input', { class: 'txt-input', placeholder: 'שם מלא', 'aria-label': 'שם מלא' });
+  const phoneIn = el('input', { class: 'txt-input mt', placeholder: 'טלפון נייד', type: 'tel', inputmode: 'tel', 'aria-label': 'טלפון' });
+
+  const modal = el('div', { class: 'modal' },
+    el('div', { class: 'center', style: 'font-size:2.6rem' }, '🎁'),
+    el('h3', { class: 'center' }, 'סיימתם הכול — הגרלה!'),
+    el('p', { class: 'center' }, m.prize + ' יכול להיות שלכם.'),
+    el('p', { class: 'small muted center' }, m.note),
+    nameIn, phoneIn,
+    el('div', { class: 'mt', style: 'display:flex; gap:8px' },
+      el('button', {
+        class: 'btn btn-accent', style: 'flex:1', onclick: async (e) => {
+          const name = nameIn.value.trim(), phone = phoneIn.value.trim();
+          if (name.length < 2) { showToast('נשמח לשם מלא', 'warning'); return; }
+          if (!validPhone(phone)) { showToast('בדקו את מספר הטלפון', 'warning'); return; }
+          e.target.disabled = true;
+          e.target.textContent = 'נרשם…';
+          try {
+            if (S.serverMode) {
+              const res = await apiCall('enterRaffle', { rid: getRid(), name, phone });
+              if (!res.success) throw new Error(res.message);
+            }
+            S.raffleEntered = true;
+            localStorage.setItem(RAFFLE_KEY, 'yes');
+            closeModal();
+            showToast('נרשמתם — בהצלחה! 🎉', 'success', 5000);
+            goCategories();
+          } catch (err) {
+            e.target.disabled = false;
+            e.target.textContent = 'הרשמה 🎁';
+            showToast(err.message || 'ההרשמה נכשלה — נסו שוב', 'error');
+          }
+        }
+      }, 'הרשמה 🎁'),
+      el('button', { class: 'btn btn-ghost', onclick: () => { closeModal(); goCategories(); } }, 'אחר כך')
+    )
+  );
+  openModal(modal);
+}
+
+// ── מודאל + קונפטי ──────────────────────────────────────
+
+function openModal(modalNode) {
+  closeModal();
+  const back = el('div', { class: 'modal-back', id: 'modalBack', onclick: (e) => { if (e.target.id === 'modalBack') closeModal(); } }, modalNode);
+  document.body.appendChild(back);
+}
+
+function closeModal() {
+  const b = document.getElementById('modalBack');
+  if (b) b.remove();
+}
+
+function celebrate() {
+  const colors = ['#2E6B4F', '#C9603B', '#D9A441', '#4E8EA2', '#8A5A83'];
+  for (let i = 0; i < 80; i++) {
+    const p = document.createElement('div');
+    p.className = 'confetti-piece';
+    p.style.left = Math.random() * 100 + 'vw';
+    p.style.background = colors[i % colors.length];
+    p.style.animationDuration = (2.2 + Math.random() * 2) + 's';
+    p.style.animationDelay = (Math.random() * .8) + 's';
+    p.style.transform = 'rotate(' + Math.random() * 360 + 'deg)';
+    document.body.appendChild(p);
+    setTimeout(() => p.remove(), 5200);
+  }
+}
+</script>
+</body>
+</html>

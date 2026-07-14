@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>דשבורד צוות — סקר נופי פרת</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&family=Suez+One&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js"></script>
+  <script src="utils.js"></script>
+</head>
+<body>
+
+<header class="topbar wide-bar">
+  <div class="topbar-in">
+    <span class="brand"><span class="brand-dot"></span> דשבורד הצוות · נופי פרת</span>
+    <div class="spacer"></div>
+    <a class="btn btn-ghost btn-sm" id="sheetLink" href="#" target="_blank" rel="noopener">פתיחת הגיליון</a>
+  </div>
+</header>
+
+<main class="wrap wide" id="app"></main>
+
+<script>
+const D = { rows: [], survey: null, raffleCount: 0, respondents: {}, currentTab: 'overview' };
+
+init();
+
+async function init() {
+  document.getElementById('sheetLink').href = CONFIG.SHEETS_URL;
+  const savedPw = sessionStorage.getItem('np_dash_pw');
+  if (savedPw) { load(savedPw); } else { renderLogin(); }
+}
+
+function renderLogin(err) {
+  const pwIn = el('input', { class: 'txt-input', type: 'password', placeholder: 'סיסמת הצוות', 'aria-label': 'סיסמה' });
+  pwIn.addEventListener('keydown', e => { if (e.key === 'Enter') load(pwIn.value); });
+  const view = el('div', { class: 'card', style: 'max-width:400px; margin:60px auto' },
+    el('h2', { class: 'mb' }, '🔐 כניסת צוות'),
+    err ? el('p', { class: 'small', style: 'color:var(--danger)' }, err) : null,
+    pwIn,
+    el('button', { class: 'btn btn-primary btn-block mt', onclick: () => load(pwIn.value) }, 'כניסה')
+  );
+  document.getElementById('app').replaceChildren(view);
+  pwIn.focus();
+}
+
+async function load(password) {
+  const app = document.getElementById('app');
+  app.replaceChildren(el('div', { class: 'center', style: 'padding:80px 0' }, el('div', { class: 'spinner' }), el('p', { class: 'muted' }, 'טוען נתונים…')));
+  try {
+    if (isLocalMode()) throw new Error('SCRIPT_URL עדיין לא הוגדר ב-config.js');
+    const res = await apiCall('getResults', { password });
+    if (!res.success) { sessionStorage.removeItem('np_dash_pw'); return renderLogin(res.message); }
+    sessionStorage.setItem('np_dash_pw', password);
+    D.rows = res.rows; D.survey = res.survey; D.raffleCount = res.raffleCount || 0;
+    // מיזוג לפי עונה — תשובה אחרונה גוברת
+    D.respondents = {};
+    D.rows.forEach(r => {
+      D.respondents[r.rid] = D.respondents[r.rid] || { chapters: {}, answers: {} };
+      D.respondents[r.rid].chapters[r.chapter] = r.ts;
+      Object.assign(D.respondents[r.rid].answers, r.answers);
+    });
+    render();
+  } catch (e) {
+    app.replaceChildren(el('div', { class: 'card center' },
+      el('p', { style: 'color:var(--danger)' }, 'שגיאה בטעינה: ' + e.message),
+      el('button', { class: 'btn btn-ghost mt', onclick: () => location.reload() }, 'נסו שוב')));
+  }
+}
+
+function answersOf(qId) {
+  return Object.values(D.respondents)
+    .map(r => r.answers[qId])
+    .filter(v => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && !v.length));
+}
+
+function render() {
+  const rids = Object.keys(D.respondents);
+  const app = document.getElementById('app');
+
+  const tabs = el('div', { class: 'pill-tabs' });
+  const mkTab = (id, label) => el('button', {
+    class: 'pill-tab' + (D.currentTab === id ? ' sel' : ''),
+    onclick: () => { D.currentTab = id; render(); }
+  }, label);
+  tabs.append(mkTab('overview', '📈 מבט-על'));
+  D.survey.chapters.forEach(ch => tabs.append(mkTab(ch.id, (ch.icon || '') + ' ' + ch.title)));
+
+  const kids = [
+    el('div', { class: 'stat-row', style: 'margin-top:20px' },
+      statTile(rids.length, 'עונים'),
+      statTile(D.rows.length, 'פרקים שהוגשו'),
+      statTile(rids.length ? (D.rows.length / rids.length).toFixed(1) : '—', 'פרקים לעונה בממוצע'),
+      statTile(D.raffleCount, 'נרשמו להגרלה 🎁'),
+    ),
+    tabs,
+  ];
+
+  if (D.currentTab === 'overview') kids.push(renderOverview());
+  else {
+    const ch = D.survey.chapters.find(c => c.id === D.currentTab);
+    if (ch) kids.push(renderChapter(ch));
+  }
+
+  app.replaceChildren(el('div', { class: 'fade-in' }, ...kids));
+}
+
+function statTile(num, lbl) {
+  return el('div', { class: 'stat-tile' }, el('div', { class: 'num' }, String(num)), el('div', { class: 'lbl' }, lbl));
+}
+
+function renderOverview() {
+  const wrap = el('div', {});
+  // כמה ענו על כל פרק
+  const card = el('div', { class: 'card' }, el('h3', { class: 'mb' }, 'מענה לפי פרק'));
+  const max = Math.max(1, ...D.survey.chapters.map(ch => chapterRespondents(ch.id)));
+  D.survey.chapters.forEach(ch => {
+    const n = chapterRespondents(ch.id);
+    card.append(el('div', { class: 'bar-row' },
+      el('div', {},
+        el('div', { class: 'bar-name' }, (ch.icon || '') + ' ' + ch.title),
+        el('div', { class: 'bar-track' }, el('div', { class: 'bar-fill', style: 'width:' + Math.round((n / max) * 100) + '%' }, String(n)))
+      ),
+      el('button', { class: 'btn btn-ghost btn-sm', onclick: () => { D.currentTab = ch.id; render(); } }, 'פירוט')
+    ));
+  });
+  wrap.append(card);
+
+  // ציוני הסולמות הנמוכים/גבוהים ביותר — מבט מהיר על חוזקות וכאבים
+  const scales = [];
+  D.survey.chapters.forEach(ch => ch.questions.forEach(q => {
+    if (q.type !== 'scale') return;
+    const vals = answersOf(q.id).map(Number).filter(n => !isNaN(n));
+    if (vals.length >= 3) scales.push({ ch, q, n: vals.length, avg: vals.reduce((a, b) => a + b, 0) / vals.length });
+  }));
+  scales.sort((a, b) => a.avg - b.avg);
+  if (scales.length) {
+    const lows = scales.slice(0, 8), highs = scales.slice(-8).reverse();
+    wrap.append(
+      el('div', { class: 'card' },
+        el('h3', { class: 'mb' }, '🔻 הציונים הנמוכים ביותר — כאן כואב'),
+        ...lows.map(s => scaleRow(s))
+      ),
+      el('div', { class: 'card' },
+        el('h3', { class: 'mb' }, '🔺 הציונים הגבוהים ביותר — מה עובד'),
+        ...highs.map(s => scaleRow(s))
+      )
+    );
+  }
+  return wrap;
+}
+
+function scaleRow(s) {
+  return el('div', { class: 'bar-row' },
+    el('div', {},
+      el('div', { class: 'bar-name' }, s.q.text),
+      el('div', { class: 'small muted' }, (s.ch.icon || '') + ' ' + s.ch.title + ' · ' + s.n + ' תשובות')
+    ),
+    avgChip(s.avg)
+  );
+}
+
+function avgChip(avg) {
+  const cls = avg >= 7 ? 'avg-good' : avg >= 5 ? 'avg-mid' : 'avg-low';
+  return el('span', { class: 'avg-chip ' + cls }, avg.toFixed(1));
+}
+
+function chapterRespondents(chId) {
+  return Object.values(D.respondents).filter(r => r.chapters[chId]).length;
+}
+
+function renderChapter(ch) {
+  const wrap = el('div', {});
+  wrap.append(el('div', { class: 'chapters-head' },
+    el('h2', {}, (ch.icon || '') + ' ' + ch.title),
+    el('p', {}, chapterRespondents(ch.id) + ' עונים הגישו את הפרק')
+  ));
+
+  ch.questions.forEach(q => {
+    const vals = answersOf(q.id);
+    const card = el('div', { class: 'card' },
+      el('p', { class: 'q-text' }, q.text),
+      el('p', { class: 'small muted mb' }, vals.length + ' תשובות')
+    );
+    if (!vals.length) { card.append(el('p', { class: 'muted small' }, '— אין תשובות עדיין —')); wrap.append(card); return; }
+
+    if (q.type === 'scale' || q.type === 'number') {
+      const nums = vals.map(Number).filter(n => !isNaN(n));
+      const avg = nums.reduce((a, b) => a + b, 0) / nums.length;
+      card.append(el('div', { class: 'mb' }, avgChip(avg), el('span', { class: 'small muted' }, '  ממוצע')));
+      if (q.type === 'scale') {
+        const hist = {};
+        nums.forEach(n => hist[n] = (hist[n] || 0) + 1);
+        const maxH = Math.max(...Object.values(hist));
+        const histWrap = el('div', { style: 'display:flex; gap:4px; align-items:flex-end; height:70px; direction:ltr' });
+        for (let v = q.min || 1; v <= (q.max || 10); v++) {
+          const h = hist[v] ? Math.max(8, (hist[v] / maxH) * 60) : 3;
+          histWrap.append(el('div', { style: 'flex:1; text-align:center' },
+            el('div', { style: 'background:var(--primary); opacity:' + (hist[v] ? '.85' : '.15') + '; border-radius:4px 4px 0 0; height:' + h + 'px', title: hist[v] || 0 }),
+            el('div', { class: 'small muted', style: 'font-size:.7rem' }, String(v))
+          ));
+        }
+        card.append(histWrap);
+        card.append(el('div', { class: 'scale-labels' }, el('span', {}, q.minLabel || ''), el('span', {}, q.maxLabel || '')));
+      }
+    } else if (q.type === 'radio' || q.type === 'checkbox') {
+      const counts = {};
+      vals.forEach(v => (Array.isArray(v) ? v : [v]).forEach(o => {
+        const key = String(o).startsWith('אחר: ') ? o : String(o);
+        counts[key] = (counts[key] || 0) + 1;
+      }));
+      const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+      const maxC = entries[0][1];
+      entries.forEach(([opt, n]) => {
+        card.append(el('div', { class: 'bar-row' },
+          el('div', {},
+            el('div', { class: 'bar-name' }, opt),
+            el('div', { class: 'bar-track' }, el('div', { class: 'bar-fill', style: 'width:' + Math.round((n / maxC) * 100) + '%' }, String(n)))
+          ),
+          el('span', { class: 'small muted' }, Math.round((n / vals.length) * 100) + '%')
+        ));
+      });
+    } else if (q.type === 'rank') {
+      const sums = {}, ns = {};
+      vals.forEach(arr => Array.isArray(arr) && arr.forEach((opt, idx) => {
+        sums[opt] = (sums[opt] || 0) + idx + 1;
+        ns[opt] = (ns[opt] || 0) + 1;
+      }));
+      Object.entries(sums)
+        .map(([opt, sum]) => [opt, sum / ns[opt]])
+        .sort((a, b) => a[1] - b[1])
+        .forEach(([opt, avg], i) => {
+          card.append(el('div', { class: 'bar-row' },
+            el('div', { class: 'bar-name' }, (i + 1) + '. ' + opt),
+            el('span', { class: 'small muted' }, 'מיקום ממוצע ' + avg.toFixed(1))
+          ));
+        });
+    } else {
+      // טקסט חופשי
+      vals.forEach(v => card.append(el('div', { class: 'open-answer' }, String(v))));
+    }
+    wrap.append(card);
+  });
+  return wrap;
+}
+</script>
+</body>
+</html>

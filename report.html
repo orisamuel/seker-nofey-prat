@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>תוצאות הסקר — נופי פרת</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌿</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&family=Suez+One&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js"></script>
+  <script src="utils.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-in">
+    <span class="brand"><span class="brand-dot"></span> נופי פרת</span>
+    <div class="spacer"></div>
+    <a class="btn btn-ghost btn-sm" href="index.html">לסקר</a>
+  </div>
+</header>
+
+<main class="wrap" id="app">
+  <div class="center" style="padding:80px 0">
+    <div class="spinner"></div>
+    <p class="muted">טוען את התוצאות…</p>
+  </div>
+</main>
+
+<script>
+init();
+
+async function init() {
+  const app = document.getElementById('app');
+  try {
+    if (isLocalMode()) throw new Error('המערכת עדיין לא חוברה לשרת');
+    const res = await apiCall('getPublicReport');
+    if (!res.success) throw new Error(res.message);
+    render(res.report);
+  } catch (e) {
+    app.replaceChildren(el('div', { class: 'hero' },
+      el('h1', {}, 'תוצאות הסקר'),
+      el('p', { class: 'sub mt' }, e.message || 'הדוח עדיין לא פורסם'),
+      el('a', { class: 'btn btn-primary mt', href: 'index.html' }, 'לסקר עצמו ←')
+    ));
+  }
+}
+
+function render(report) {
+  const app = document.getElementById('app');
+  const kids = [
+    el('section', { class: 'hero' },
+      el('span', { class: 'kicker' }, 'שקיפות מלאה'),
+      el('h1', {}, 'תוצאות סקר התושבים'),
+      el('p', { class: 'sub' }, report.totalRespondents + ' תושבות ותושבים השתתפו — תודה!'),
+    ),
+    el('div', { class: 'card tinted small' },
+      el('p', {}, 'מטעמי צנעת הפרט מוצגים כאן נתונים מצרפיים בלבד: שאלות עם פחות מ-5 תשובות ותשובות בטקסט חופשי אינן מוצגות.')
+    ),
+  ];
+
+  report.chapters.forEach(ch => {
+    const card = el('div', { class: 'card' },
+      el('h3', { style: 'color:var(--primary-deep); margin-bottom:12px' }, (ch.icon || '') + ' ' + ch.title));
+    ch.questions.forEach(q => {
+      const qWrap = el('div', { class: 'mb', style: 'padding-bottom:12px; border-bottom:1px dashed var(--line)' },
+        el('p', { class: 'q-text', style: 'font-size:.98rem' }, q.text),
+        el('p', { class: 'small muted' }, q.count + ' תשובות'));
+
+      if (q.type === 'scale') {
+        qWrap.append(el('div', {},
+          el('span', { class: 'avg-chip ' + (q.avg >= 7 ? 'avg-good' : q.avg >= 5 ? 'avg-mid' : 'avg-low') }, q.avg.toFixed(1)),
+          el('span', { class: 'small muted' }, ' ממוצע (1–10)')));
+        if (q.hist) {
+          const maxH = Math.max(...Object.values(q.hist));
+          const histWrap = el('div', { style: 'display:flex; gap:3px; align-items:flex-end; height:54px; direction:ltr; margin-top:8px' });
+          for (let v = 1; v <= 10; v++) {
+            const n = q.hist[v] || 0;
+            histWrap.append(el('div', { style: 'flex:1; text-align:center' },
+              el('div', { style: 'background:var(--primary); opacity:' + (n ? '.85' : '.15') + '; border-radius:3px 3px 0 0; height:' + (n ? Math.max(6, (n / maxH) * 46) : 2) + 'px', title: String(n) }),
+              el('div', { class: 'muted', style: 'font-size:.62rem' }, String(v))));
+          }
+          qWrap.append(histWrap,
+            el('div', { class: 'scale-labels' }, el('span', {}, q.minLabel || ''), el('span', {}, q.maxLabel || '')));
+        }
+      } else if (q.counts) {
+        const entries = Object.entries(q.counts).sort((a, b) => b[1] - a[1]);
+        const maxC = entries.length ? entries[0][1] : 1;
+        entries.forEach(([opt, n]) => {
+          qWrap.append(el('div', { class: 'bar-row' },
+            el('div', {},
+              el('div', { class: 'bar-name' }, opt),
+              el('div', { class: 'bar-track', style: 'height:20px' },
+                el('div', { class: 'bar-fill', style: 'width:' + Math.round((n / maxC) * 100) + '%; font-size:.72rem' }, String(n)))),
+            el('span', { class: 'small muted' }, Math.round((n / q.count) * 100) + '%')));
+        });
+      } else if (q.avgPos) {
+        Object.entries(q.avgPos).sort((a, b) => a[1] - b[1]).forEach(([opt, avg], i) => {
+          qWrap.append(el('div', { class: 'bar-row' },
+            el('div', { class: 'bar-name' }, (i + 1) + '. ' + opt),
+            el('span', { class: 'small muted' }, 'מיקום ממוצע ' + avg.toFixed(1))));
+        });
+      } else if (q.avg !== undefined) {
+        qWrap.append(el('p', {}, 'ממוצע: ' + q.avg));
+      }
+      card.append(qWrap);
+    });
+    kids.push(card);
+  });
+
+  kids.push(el('p', { class: 'center muted small', style: 'margin-top:20px' }, 'ועד ההנהלה ועובדי היישוב · נופי פרת'));
+  app.replaceChildren(el('div', { class: 'fade-in' }, ...kids));
+}
+</script>
+</body>
+</html>

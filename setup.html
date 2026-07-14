@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>התקנה — סקר נופי פרת</title>
+  <meta name="robots" content="noindex">
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js"></script>
+  <script src="utils.js"></script>
+  <script src="survey-data.js"></script>
+</head>
+<body>
+<main class="wrap">
+  <div class="card" style="max-width:480px; margin:50px auto">
+    <h2 class="mb">⚙️ סנכרון השאלות לגיליון</h2>
+    <p class="small muted mb">
+      פעולה חד-פעמית (או בכל פעם שרוצים לטעון מחדש את השאלות מקובץ survey-data.js).
+      <strong>שימו לב:</strong> הסנכרון דורס את טאבי "פרקים" ו"שאלות" בגיליון — עריכות ידניות שם יימחקו. התשובות לא נפגעות.
+    </p>
+    <input class="txt-input" type="password" id="pw" placeholder="סיסמת הצוות (dashboardPassword)">
+    <button class="btn btn-primary btn-block mt" id="go" onclick="seed()">סנכרון שאלות לגיליון</button>
+    <p class="small muted mt" id="status"></p>
+  </div>
+</main>
+<script>
+async function seed() {
+  const btn = document.getElementById('go');
+  const status = document.getElementById('status');
+  const pw = document.getElementById('pw').value;
+  if (isLocalMode()) { status.textContent = '⚠️ קודם הגדירו SCRIPT_URL ב-config.js'; return; }
+  btn.disabled = true;
+  status.textContent = 'שולח… (יכול לקחת כמה שניות)';
+  try {
+    const res = await apiPost('seedSurvey', { survey: window.SURVEY_DATA, password: pw });
+    status.textContent = res.success ? '✅ ' + res.message : '❌ ' + res.message;
+  } catch (e) {
+    status.textContent = '❌ ' + e.message;
+  }
+  btn.disabled = false;
+}
+</script>
+</body>
+</html>
