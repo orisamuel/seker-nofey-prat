@@ -34,6 +34,7 @@
     <div class="progress-rail" aria-hidden="true"><div class="progress-fill" id="progressFill"></div></div>
     <span class="progress-label" id="progressLabel"></span>
     <button class="topbar-btn" onclick="showLaterModal()" title="שמירה והמשך אחר־כך">🔖 <span class="later-txt">אמשיך אחר־כך</span></button>
+    <button class="topbar-btn" onclick="showRestartModal()" aria-label="התחלה מחדש" title="התחלה מחדש">↺</button>
     <button class="topbar-btn" onclick="showFaq()" aria-label="שאלות ותשובות">❓</button>
   </div>
 </header>
@@ -232,12 +233,15 @@ function goCategories() {
       el('span', { class: 'txt' }, el('strong', {}, 'סיימתם ונרשמתם להגרלה'), ' — בהצלחה!')
     ));
   } else {
+    const onlyAboutLeft = stats.total - stats.done === 1 && !S.done['about'];
     kids.push(el('div', { class: 'raffle-strip' },
       el('span', { class: 'emoji' }, '🎁'),
       el('span', { class: 'txt' },
-        stats.done > 0
-          ? el('span', {}, el('strong', {}, (stats.total - stats.done) + ' פרקים'), ' בינך לבין הגרלת ' + m.raffle.prize)
-          : el('span', {}, 'משלימים את הסקר ← נכנסים להגרלת ', el('strong', {}, m.raffle.prize))
+        onlyAboutLeft
+          ? el('span', {}, 'נשאר רק למלא ', el('strong', {}, '"קצת עליך"'), ' — וההגרלה נפתחת!')
+          : stats.done > 0
+            ? el('span', {}, el('strong', {}, (stats.total - stats.done) + ' פרקים'), ' בינך לבין הגרלת ' + m.raffle.prize)
+            : el('span', {}, 'משלימים את הסקר ← נכנסים להגרלת ', el('strong', {}, m.raffle.prize))
       )
     ));
   }
@@ -352,7 +356,7 @@ function goChapter(chId) {
 
   if (ch.id !== 'about') {
     container.append(el('p', { class: 'center' },
-      el('button', { class: 'skip-link', onclick: () => skipChapter(ch) }, 'הנושא לא רלוונטי אליי — דילוג ⏭')
+      el('button', { class: 'skip-link', onclick: () => skipChapter(ch) }, 'הנושא לא רלוונטי אליי — לנושא הבא ←')
     ));
   }
 
@@ -632,7 +636,14 @@ async function submitChapter(ch) {
   if (ch.id === 'about') visAns.about_submitted = 'כן';
 
   if (!Object.keys(visAns).length) {
-    showToast('ענו לפחות על שאלה אחת 🙂', 'warning');
+    openModal(el('div', { class: 'modal' },
+      el('h3', {}, 'עוד לא עניתם כאן'),
+      el('p', {}, 'אפשר לענות אפילו על שאלה אחת — או לסמן שהנושא לא רלוונטי ולהמשיך הלאה.'),
+      el('div', { class: 'mt', style: 'display:grid; gap:8px' },
+        el('button', { class: 'btn btn-primary', onclick: closeModal }, 'למענה'),
+        el('button', { class: 'btn btn-ghost', onclick: () => { closeModal(); skipChapter(ch); } }, 'הנושא לא רלוונטי אליי — לנושא הבא ←')
+      )
+    ));
     return;
   }
 
@@ -719,7 +730,7 @@ function validPhone(p) {
 }
 
 function showLaterModal() {
-  const phoneIn = el('input', { class: 'txt-input', placeholder: '05X-XXXXXXX', type: 'tel', inputmode: 'tel', 'aria-label': 'טלפון' });
+  const phoneIn = el('input', { class: 'txt-input', placeholder: '05X-XXXXXXX', type: 'tel', inputmode: 'tel', dir: 'ltr', style: 'text-align:center', 'aria-label': 'טלפון' });
   const modal = el('div', { class: 'modal' },
     el('h3', {}, '🔖 ממשיכים מתי שנוח'),
     el('p', {}, 'ההתקדמות נשמרת אוטומטית במכשיר הזה — אפשר פשוט לסגור ולחזור.'),
@@ -750,7 +761,7 @@ function showLaterModal() {
 }
 
 function showResumeByPhone() {
-  const phoneIn = el('input', { class: 'txt-input', placeholder: '05X-XXXXXXX', type: 'tel', inputmode: 'tel', 'aria-label': 'טלפון' });
+  const phoneIn = el('input', { class: 'txt-input', placeholder: '05X-XXXXXXX', type: 'tel', inputmode: 'tel', dir: 'ltr', style: 'text-align:center', 'aria-label': 'טלפון' });
   const modal = el('div', { class: 'modal' },
     el('h3', {}, 'ממשיכים מאיפה שעצרתם'),
     el('p', {}, 'הזינו את הטלפון שהשארתם במכשיר הקודם:'),
@@ -787,6 +798,32 @@ function showResumeByPhone() {
   openModal(modal);
 }
 
+// ── התחלה מחדש ──────────────────────────────────────────
+
+function showRestartModal() {
+  const modal = el('div', { class: 'modal' },
+    el('h3', {}, '↺ להתחיל מחדש?'),
+    el('p', {}, 'כל התשובות שלך יימחקו ותוכל להתחיל את הסקר מחדש. האם אתה בטוח?'),
+    el('div', { class: 'mt', style: 'display:flex; gap:8px' },
+      el('button', { class: 'btn btn-accent', style: 'flex:1', onclick: restartAll }, 'כן, מתחילים מחדש'),
+      el('button', { class: 'btn btn-ghost', style: 'flex:1', onclick: closeModal }, 'ביטול')
+    )
+  );
+  openModal(modal);
+}
+
+function restartAll() {
+  Object.keys(localStorage)
+    .filter(k => k.startsWith('np_'))
+    .forEach(k => localStorage.removeItem(k));
+  S.done = {};
+  S.raffleEntered = false;
+  setRid(makeRid()); // זהות אנונימית חדשה — התשובות הישנות מנותקות
+  closeModal();
+  showToast('התחלנו דף חדש 🌱', 'success');
+  goLanding();
+}
+
 // ── שו"ת ─────────────────────────────────────────────────
 
 function showFaq() {
@@ -814,7 +851,7 @@ function closeDrawer() {
 function showRaffleModal() {
   const m = S.survey.meta.raffle;
   const nameIn = el('input', { class: 'txt-input', placeholder: 'שם מלא', 'aria-label': 'שם מלא' });
-  const phoneIn = el('input', { class: 'txt-input mt', placeholder: 'טלפון נייד', type: 'tel', inputmode: 'tel', 'aria-label': 'טלפון' });
+  const phoneIn = el('input', { class: 'txt-input mt', placeholder: 'טלפון נייד', type: 'tel', inputmode: 'tel', dir: 'ltr', style: 'text-align:center', 'aria-label': 'טלפון' });
 
   const modal = el('div', { class: 'modal' },
     el('div', { class: 'center', style: 'font-size:2.6rem' }, '🎁'),
