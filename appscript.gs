@@ -79,18 +79,59 @@ function evalCond(cond, answers) {
   const val = answers[cond.q];
   if (val === undefined || val === null || val === '' ||
       (Array.isArray(val) && val.length === 0)) return true;
-  if (cond.in) return cond.in.indexOf(val) !== -1;
-  if (cond.notIn) return cond.notIn.indexOf(val) === -1;
-  if (cond.any) return Array.isArray(val) && cond.any.some(function (o) { return val.indexOf(o) !== -1; });
-  return true;
+  const vals = cond.vals || cond.in || cond.any || cond.notIn || [];
+  const neg = !!cond.neg || !!cond.notIn;
+  const match = Array.isArray(val)
+    ? vals.some(function (v) { return val.indexOf(v) !== -1; })
+    : vals.indexOf(val) !== -1;
+  return neg ? !match : match;
+}
+
+// ── סוגי שאלות: בגיליון בעברית, בקוד באנגלית ──────────────
+const TYPE_TO_HE = {
+  scale: 'סולם 1-10', radio: 'בחירה אחת', checkbox: 'בחירה מרובה',
+  text: 'טקסט קצר', textarea: 'טקסט ארוך', number: 'מספר', rank: 'דירוג',
+};
+
+function normalizeType(t) {
+  t = String(t || '').trim();
+  if (TYPE_TO_HE[t]) return t; // כבר באנגלית
+  for (var k in TYPE_TO_HE) if (TYPE_TO_HE[k] === t) return k;
+  return t;
+}
+
+// ── תנאי הצגה: בגיליון בתחביר פשוט, בקוד כאובייקט ─────────
+//   "syn_use = כן"  · "about_gender != גבר"  · "about_kids = נוער (ז׳–י״ב) | יסודי (א׳–ו׳)"
+function parseCondition(s) {
+  s = String(s || '').trim();
+  if (!s) return null;
+  if (s.charAt(0) === '{') return parseJsonSafe(s, null); // תאימות ל-JSON ישן
+  var neg = s.indexOf('!=') !== -1;
+  var parts = s.split(neg ? '!=' : '=');
+  if (parts.length < 2) return null;
+  var q = parts[0].trim();
+  var vals = parts.slice(1).join('=').split('|')
+    .map(function (v) { return v.trim(); })
+    .filter(function (v) { return v !== ''; });
+  if (!q || !vals.length) return null;
+  var c = { q: q, vals: vals };
+  if (neg) c.neg = true;
+  return c;
+}
+
+function condToString(c) {
+  if (!c || !c.q) return '';
+  var vals = c.vals || c.in || c.any || c.notIn || [];
+  var neg = !!c.neg || !!c.notIn;
+  return c.q + ' ' + (neg ? '!=' : '=') + ' ' + vals.join(' | ');
 }
 
 // ============================================================
 // מבנה הסקר: פרקים + שאלות
 // ============================================================
 
-const CHAPTER_HEADERS = ['id', 'כותרת', 'אייקון', 'תיאור', 'תנאי הצגה (JSON)', 'שער', 'פעיל', 'סדר', 'קטגוריה'];
-const QUESTION_HEADERS = ['פרק', 'id', 'סוג', 'שאלה', 'עזרה', 'אפשרויות ( | )', 'אחר', 'בלעדי', 'מינ', 'מקס', 'תווית מינ', 'תווית מקס', 'תנאי הצגה (JSON)', 'פעיל', 'סדר'];
+const CHAPTER_HEADERS = ['id', 'כותרת', 'אייקון', 'תיאור', 'תנאי הצגה', 'שער', 'פעיל', 'סדר', 'קטגוריה'];
+const QUESTION_HEADERS = ['פרק', 'id', 'סוג', 'שאלה', 'עזרה', 'אפשרויות ( | )', 'אחר', 'בלעדי', 'מינ', 'מקס', 'תווית מינ', 'תווית מקס', 'תנאי הצגה', 'פעיל', 'סדר'];
 
 // זריעת המבנה מהלקוח (setup.html שולח את survey-data.js המלא)
 function seedSurvey(surveyJson, password) {
@@ -110,17 +151,17 @@ function seedSurvey(surveyJson, password) {
   survey.chapters.forEach(function (ch, ci) {
     chRows.push([
       ch.id, ch.title, ch.icon || '', ch.desc || '',
-      ch.showIf ? JSON.stringify(ch.showIf) : '',
+      condToString(ch.showIf),
       (ch.gate || ch.core) ? 'כן' : '', 'כן', ci + 1, ch.cat || '',
     ]);
     (ch.questions || []).forEach(function (q, qi) {
       qRows.push([
-        ch.id, q.id, q.type, q.text, q.help || '',
+        ch.id, q.id, TYPE_TO_HE[q.type] || q.type, q.text, q.help || '',
         (q.opts || []).join(' | '),
         q.other ? 'כן' : '', q.exclusive || '',
         q.min !== undefined ? q.min : '', q.max !== undefined ? q.max : '',
         q.minLabel || '', q.maxLabel || '',
-        q.showIf ? JSON.stringify(q.showIf) : '',
+        condToString(q.showIf),
         'כן', qi + 1,
       ]);
     });
@@ -136,9 +177,44 @@ function seedSurvey(surveyJson, password) {
   ensureSheet(T_RAW, ['זמן', 'קוד עונה', 'פרק', 'תשובות (JSON)']);
   ensureSheet(T_RAFFLE, ['זמן', 'שם', 'טלפון']);
   ensureSheet(T_LINKS, ['זמן', 'hash', 'קוד עונה']);
+  writeGuideSheet();
   rebuildFlatHeaders();
 
   return { success: true, message: 'נטענו ' + chRows.length + ' פרקים ו-' + qRows.length + ' שאלות' };
+}
+
+// טאב "מדריך עריכה" — הוראות לצוות, נכתב מחדש בכל סנכרון
+function writeGuideSheet() {
+  const ss = getSpreadsheet();
+  let sheet = ss.getSheetByName('מדריך עריכה');
+  if (!sheet) sheet = ss.insertSheet('מדריך עריכה');
+  sheet.clearContents();
+  const rows = [
+    ['📝 איך עורכים את הסקר? (השינויים חיים באתר מיד — בלי פריסה מחדש)'],
+    [''],
+    ['עריכת נוסח', 'פשוט עורכים את התא בעמודה "שאלה" בטאב "שאלות". אותו דבר לגבי אפשרויות, עזרה ותוויות.'],
+    ['הוספת שאלה', 'מוסיפים שורה בטאב "שאלות": פרק קיים, id חדש באנגלית (למשל post_x1), סוג ונוסח. עמודת "סדר" קובעת את המיקום בפרק.'],
+    ['השבתת שאלה/פרק', 'עמודת "פעיל" = לא. השאלה נעלמת מהאתר, והתשובות שכבר נאספו נשמרות.'],
+    ['⚠️ חשוב', 'לא לשנות id של שאלה קיימת — התוצאות נשמרות לפי ה-id.'],
+    [''],
+    ['סוגי שאלות', 'סולם 1-10 · בחירה אחת · בחירה מרובה · טקסט קצר · טקסט ארוך · מספר · דירוג'],
+    ['אפשרויות', 'מפרידים בקו אנכי | . עמודת "אחר" = כן מוסיפה אפשרות "אחר" עם שדה חופשי.'],
+    ['סולם', 'עמודות מינ/מקס (בד"כ 1 ו-10) + תווית מינ/תווית מקס (הטקסט בקצוות).'],
+    ['בלעדי', 'בבחירה מרובה: אפשרות שמבטלת את כל השאר (למשל "אין ילדים בבית").'],
+    [''],
+    ['תנאי הצגה', 'מציג שאלה/פרק רק לפי תשובה קודמת. תחביר: id = ערך  (או כמה ערכים עם | )'],
+    ['דוגמה 1', 'syn_use = כן          ← מוצג רק למי שענה "כן" לשאלה syn_use'],
+    ['דוגמה 2', 'about_gender != גבר   ← מוצג לכולם חוץ ממי שענה "גבר"'],
+    ['דוגמה 3', 'about_kids = נוער (ז׳–י״ב) | יסודי (א׳–ו׳)  ← מוצג אם סומן אחד מאלה'],
+    [''],
+    ['קטגוריות (עמודה בטאב "פרקים")', 'gov=ניהול · infra=תשתיות · space=מרחב ציבורי · edu=חינוך · comm=קהילה · cult=תרבות'],
+    [''],
+    ['הגדרות (טאב "הגדרות")', 'surveyOpen=לא סוגר את הסקר · publicReport=כן מפרסם את הדוח הציבורי · dashboardPassword — סיסמת הצוות'],
+    ['תוצאות', 'טאב "תוצאות" — שורה לכל עונה, עמודה לכל שאלה. טאב "תשובות גולמי" — גיבוי מלא, לא לערוך.'],
+  ];
+  sheet.getRange(1, 1, rows.length, 2).setValues(rows.map(function (r) { return [r[0] || '', r[1] || '']; }));
+  sheet.setColumnWidth(1, 220);
+  sheet.setColumnWidth(2, 700);
 }
 
 function upsertSetting(sheet, key, value, note) {
@@ -166,7 +242,7 @@ function loadSurvey() {
   for (let i = 1; i < qData.length; i++) {
     const r = qData[i];
     if (String(r[13]).trim() === 'לא') continue; // לא פעיל
-    const q = { id: String(r[1]).trim(), type: String(r[2]).trim(), text: String(r[3]) };
+    const q = { id: String(r[1]).trim(), type: normalizeType(r[2]), text: String(r[3]) };
     if (r[4]) q.help = String(r[4]);
     if (r[5]) q.opts = String(r[5]).split('|').map(function (s) { return s.trim(); }).filter(String);
     if (String(r[6]).trim() === 'כן') q.other = true;
@@ -175,7 +251,7 @@ function loadSurvey() {
     if (r[9] !== '') q.max = Number(r[9]);
     if (r[10]) q.minLabel = String(r[10]);
     if (r[11]) q.maxLabel = String(r[11]);
-    const cond = parseJsonSafe(String(r[12]), null);
+    const cond = parseCondition(String(r[12]));
     if (cond) q.showIf = cond;
     const chId = String(r[0]).trim();
     (byChapter[chId] = byChapter[chId] || []).push(q);
@@ -189,7 +265,7 @@ function loadSurvey() {
     const ch = { id: String(r[0]).trim(), title: String(r[1]), questions: byChapter[String(r[0]).trim()] || [] };
     if (r[2]) ch.icon = String(r[2]);
     if (r[3]) ch.desc = String(r[3]);
-    const cond = parseJsonSafe(String(r[4]), null);
+    const cond = parseCondition(String(r[4]));
     if (cond) ch.showIf = cond;
     if (String(r[5]).trim() === 'כן') ch.gate = true;
     if (r.length > 8 && r[8]) ch.cat = String(r[8]).trim();
@@ -260,7 +336,7 @@ function submitChapter(rid, chapterId, answersJson) {
       let headers = flat.getRange(1, 1, 1, Math.max(flat.getLastColumn(), 2)).getValues()[0];
 
       // עמודות חסרות? (שאלה חדשה שנוספה בגיליון)
-      const missing = Object.keys(answers).filter(function (qId) { return headers.indexOf(qId) === -1; });
+      const missing = Object.keys(answers).filter(function (qId) { return qId.charAt(0) !== '_' && headers.indexOf(qId) === -1; });
       if (missing.length) {
         flat.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
         headers = headers.concat(missing);
@@ -282,6 +358,7 @@ function submitChapter(rid, chapterId, answersJson) {
       }
 
       for (const qId in answers) {
+        if (qId.charAt(0) === '_') continue; // סימוני מערכת (דילוג וכו') — רק בגולמי
         const col = headers.indexOf(qId) + 1;
         if (col > 0) flat.getRange(row, col).setValue(flatValue(answers[qId]));
       }

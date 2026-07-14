@@ -325,6 +325,57 @@ input, textarea, select { font-family: inherit; font-size: inherit; color: inher
   font-size: .8rem; font-weight: 700;
 }
 
+/* כרטיס "קצת עליך" */
+.profile-strip {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%; text-align: right;
+  background: var(--surface);
+  border: none;
+  box-shadow: inset 0 0 0 2px var(--green), var(--shadow-sm);
+  border-radius: var(--r-lg);
+  padding: 12px 14px;
+  margin-bottom: 14px;
+  transition: transform .14s ease, box-shadow .14s ease;
+}
+
+.profile-strip:hover { transform: translateY(-2px); box-shadow: inset 0 0 0 2px var(--green), var(--shadow-md); }
+
+.profile-strip.is-done { box-shadow: inset 0 0 0 1.5px var(--line), var(--shadow-sm); }
+
+.profile-strip .p-icon {
+  flex: none; width: 44px; height: 44px;
+  display: grid; place-items: center;
+  font-size: 1.4rem;
+  background: var(--green-soft);
+  border-radius: 50% 50% 50% 12px;
+}
+
+.profile-strip .p-body { flex: 1; min-width: 0; }
+
+.profile-strip .p-title { display: block; font-weight: 700; font-size: 1rem; }
+
+.profile-strip .p-sub { display: block; font-size: .8rem; color: var(--muted); }
+
+.profile-strip .p-status {
+  flex: none; font-size: .78rem; font-weight: 700;
+  border-radius: 99px; padding: 4px 12px;
+  background: var(--green); color: #fff;
+}
+
+.profile-strip.is-done .p-status { background: var(--green-soft); color: var(--green-deep); }
+
+/* קישור דילוג על נושא */
+.skip-link {
+  background: none; border: none;
+  color: var(--muted);
+  font-size: .88rem; font-weight: 500;
+  text-decoration: underline dashed;
+  text-underline-offset: 4px;
+  padding: 10px 14px;
+}
+
+.skip-link:hover { color: var(--terra-deep); }
+
 /* פס הגרלה */
 .raffle-strip {
   display: flex; align-items: center; gap: 12px;
@@ -536,12 +587,12 @@ textarea.txt-input { min-height: 92px; resize: vertical; line-height: 1.55; }
 .rank-list { display: grid; gap: 8px; counter-reset: rank; }
 
 .rank-item {
-  display: flex; align-items: center; gap: 11px;
+  display: flex; align-items: center; gap: 9px;
   background: var(--surface);
   box-shadow: inset 0 0 0 1.5px var(--line);
   border-radius: var(--r-md);
-  padding: 10px 13px;
-  cursor: grab; user-select: none; -webkit-user-select: none; touch-action: none;
+  padding: 8px 6px 8px 13px;
+  user-select: none; -webkit-user-select: none;
   transition: box-shadow .12s;
 }
 
@@ -569,7 +620,19 @@ textarea.txt-input { min-height: 92px; resize: vertical; line-height: 1.55; }
 
 .rank-item .rank-label { flex: 1; font-size: .93rem; font-weight: 500; }
 
-.rank-item .rank-grip { color: var(--muted); font-size: 1.05rem; letter-spacing: 2px; }
+/* ידית הגרירה — רק ממנה גוררים; שאר הכרטיס חופשי לגלילת הדף */
+.rank-item .rank-grip {
+  color: var(--muted); font-size: 1.05rem; letter-spacing: 2px;
+  width: 42px; min-height: 42px;
+  display: grid; place-items: center;
+  border-radius: 10px;
+  background: var(--bg);
+  cursor: grab;
+  touch-action: none;
+  flex: none;
+}
+
+.rank-item .rank-grip:active { cursor: grabbing; background: var(--bg-deep); }
 
 .rank-item .rank-btns { display: flex; gap: 4px; }
 

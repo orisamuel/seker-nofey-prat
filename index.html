@@ -51,7 +51,6 @@ const S = {
   done: {},                // chapterId → ISO timestamp
   serverMode: false,
   raffleEntered: false,
-  pendingChapter: null,    // לאן ממשיכים אחרי הפרופיל
 };
 
 const DONE_KEY = 'np_done';
@@ -105,8 +104,13 @@ function catChapters(catId) {
 }
 
 function chapterState(ch) {
-  if (S.done[ch.id]) return 'done';
-  return Object.keys(getDraft(ch.id)).length ? 'partial' : 'new';
+  if (S.done[ch.id]) return isSkipped(ch.id) ? 'skipped' : 'done';
+  return Object.keys(getDraft(ch.id)).filter(k => !k.startsWith('_')).length ? 'partial' : 'new';
+}
+
+function isSkipped(chId) {
+  const d = getDraft(chId);
+  return d._skipped === 'כן' && !Object.keys(d).some(k => !k.startsWith('_'));
 }
 
 function completionStats() {
@@ -118,8 +122,6 @@ function completionStats() {
 function hasStarted() {
   return Object.keys(S.done).length > 0 || Object.keys(getDraft('about')).length > 0;
 }
-
-function profileDone() { return !!S.done['about']; }
 
 function catOf(ch) {
   return S.survey.meta.categories.find(c => c.id === ch.cat) || null;
@@ -240,6 +242,17 @@ function goCategories() {
     ));
   }
 
+  // כרטיס "קצת עליך" — מומלץ, לא חוסם
+  const aboutDone = !!S.done['about'];
+  kids.push(el('button', { class: 'profile-strip' + (aboutDone ? ' is-done' : ''), onclick: () => goChapter('about') },
+    el('span', { class: 'p-icon' }, '👋'),
+    el('span', { class: 'p-body' },
+      el('span', { class: 'p-title' }, 'קצת עליך'),
+      el('span', { class: 'p-sub' }, aboutDone ? 'מולא — אפשר לעדכן בכל רגע' : 'מומלץ למלא קודם — כדי לקבל רק את השאלות שרלוונטיות אליכם')
+    ),
+    el('span', { class: 'p-status' }, aboutDone ? '✓' : 'למילוי')
+  ));
+
   const grid = el('div', { class: 'cat-grid' });
   m.categories.forEach(cat => {
     const chs = catChapters(cat.id);
@@ -272,9 +285,9 @@ function goCategory(catId) {
   const list = el('div', { class: 'chap-list' });
   chs.forEach(ch => {
     const st = chapterState(ch);
-    const stText = { done: '✓', partial: 'באמצע', new: (visibleQuestionCount(ch)) + ' שאלות' }[st];
+    const stText = { done: '✓', skipped: 'דילגתם', partial: 'באמצע', new: (visibleQuestionCount(ch)) + ' שאלות' }[st];
     list.append(
-      el('button', { class: 'chap-row is-' + st, onclick: () => startChapter(ch.id) },
+      el('button', { class: 'chap-row is-' + (st === 'skipped' ? 'done' : st), onclick: () => goChapter(ch.id) },
         el('span', { class: 'ch-icon' }, ch.icon || '📋'),
         el('span', { class: 'ch-body' },
           el('span', { class: 'ch-title', text: ch.title }),
@@ -293,7 +306,7 @@ function goCategory(catId) {
         el('p', {}, chs.filter(c => S.done[c.id]).length + '/' + chs.length + ' נושאים הושלמו')
       )
     ),
-    next ? el('button', { class: 'btn btn-primary btn-block mb', onclick: () => startChapter(next.id) },
+    next ? el('button', { class: 'btn btn-primary btn-block mb', onclick: () => goChapter(next.id) },
       (S.done[chs[0]?.id] || Object.keys(S.done).length ? 'לנושא הבא: ' : 'מתחילים: ') + next.title + ' ←') : null,
     list,
     el('div', { class: 'mt center' },
@@ -306,41 +319,6 @@ function goCategory(catId) {
 function visibleQuestionCount(ch) {
   const ans = allAnswers();
   return ch.questions.filter(q => evalCond(q.showIf, ans)).length;
-}
-
-// ── שער הפרופיל (חד-פעמי) ────────────────────────────────
-
-function startChapter(chId) {
-  if (!profileDone() && chId !== 'about') {
-    S.pendingChapter = chId;
-    goProfile();
-    return;
-  }
-  goChapter(chId);
-}
-
-function goProfile() {
-  const ch = S.survey.chapters.find(c => c.id === 'about');
-  const answers = getDraft('about');
-
-  const qWrap = el('div', {});
-  ch.questions.forEach(q => qWrap.append(renderQuestion(ch, q, answers)));
-
-  const view = el('div', {},
-    el('div', { class: 'chapter-header' },
-      el('span', { class: 'ch-icon' }, ch.icon),
-      el('div', {},
-        el('h2', {}, ch.title),
-        el('p', { class: 'ch-desc' }, ch.desc)
-      )
-    ),
-    qWrap,
-    el('div', { class: 'chapter-nav' },
-      el('button', { class: 'btn btn-primary', id: 'submitBtn', onclick: () => submitChapter(ch) }, 'שומרים וממשיכים ←')
-    )
-  );
-  setView(view, 'green');
-  refreshVisibility(ch);
 }
 
 // ── מסך פרק ──────────────────────────────────────────────
@@ -372,11 +350,17 @@ function goChapter(chId) {
   ch.questions.forEach(q => qWrap.append(renderQuestion(ch, q, answers)));
   container.append(qWrap);
 
+  if (ch.id !== 'about') {
+    container.append(el('p', { class: 'center' },
+      el('button', { class: 'skip-link', onclick: () => skipChapter(ch) }, 'הנושא לא רלוונטי אליי — דילוג ⏭')
+    ));
+  }
+
   container.append(
     el('div', { class: 'chapter-nav' },
       el('button', { class: 'btn btn-ghost', onclick: () => ch.cat ? goCategory(ch.cat) : goCategories() }, '↩'),
       el('button', { class: 'btn btn-primary', id: 'submitBtn', onclick: () => submitChapter(ch) },
-        S.done[chId] ? 'עדכון ← והלאה' : 'שמירה ← והלאה')
+        ch.id === 'about' ? 'שמירה ←' : (S.done[chId] ? 'עדכון ← והלאה' : 'שמירה ← והלאה'))
     )
   );
 
@@ -571,6 +555,7 @@ function renderRank(ch, q, answers) {
   const build = () => {
     list.replaceChildren();
     order.forEach((label, idx) => {
+      const grip = el('span', { class: 'rank-grip', 'aria-hidden': 'true' }, '⋮⋮');
       const item = el('div', { class: 'rank-item', role: 'listitem' },
         el('span', { class: 'rank-num', 'aria-hidden': 'true' }),
         el('span', { class: 'rank-label' }, label),
@@ -584,9 +569,9 @@ function renderRank(ch, q, answers) {
             onclick: (e) => { e.stopPropagation(); move(idx, idx + 1); }
           }, '▼')
         ),
-        el('span', { class: 'rank-grip', 'aria-hidden': 'true' }, '⋮⋮')
+        grip
       );
-      attachDrag(item, idx);
+      attachDrag(grip, item, idx); // גרירה רק מהידית — שאר הכרטיס חופשי לגלילה
       list.append(item);
     });
   };
@@ -599,11 +584,10 @@ function renderRank(ch, q, answers) {
     build();
   };
 
-  const attachDrag = (item, idx) => {
-    item.addEventListener('pointerdown', (e) => {
-      if (e.target.closest('button')) return;
+  const attachDrag = (grip, item, idx) => {
+    grip.addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      item.setPointerCapture(e.pointerId);
+      grip.setPointerCapture(e.pointerId);
       item.classList.add('dragging');
       const startY = e.clientY;
       const h = item.offsetHeight + 8;
@@ -616,16 +600,16 @@ function renderRank(ch, q, answers) {
         currentIdx = Math.max(0, Math.min(order.length - 1, idx + shift));
       };
       const onUp = () => {
-        item.removeEventListener('pointermove', onMove);
-        item.removeEventListener('pointerup', onUp);
-        item.removeEventListener('pointercancel', onUp);
+        grip.removeEventListener('pointermove', onMove);
+        grip.removeEventListener('pointerup', onUp);
+        grip.removeEventListener('pointercancel', onUp);
         item.classList.remove('dragging');
         item.style.transform = '';
         if (currentIdx !== idx) move(idx, currentIdx);
       };
-      item.addEventListener('pointermove', onMove);
-      item.addEventListener('pointerup', onUp);
-      item.addEventListener('pointercancel', onUp);
+      grip.addEventListener('pointermove', onMove);
+      grip.addEventListener('pointerup', onUp);
+      grip.addEventListener('pointercancel', onUp);
     });
   };
 
@@ -670,13 +654,29 @@ async function submitChapter(ch) {
   setDraft(ch.id, visAns);
   S.done[ch.id] = new Date().toISOString();
   localStorage.setItem(DONE_KEY, JSON.stringify(S.done));
+  afterChapterDone(ch, false);
+}
 
-  // לאן ממשיכים?
+// דילוג על נושא שלם — נחשב "טופל" לצורך ההגרלה
+async function skipChapter(ch) {
+  if (S.serverMode) {
+    try {
+      const res = await apiPost('submitChapter', { rid: getRid(), chapter: ch.id, answers: { _skipped: 'כן' } });
+      if (!res.success) throw new Error(res.message || '');
+    } catch (e) {
+      showToast('לא הצליח — בדקו חיבור ונסו שוב', 'error');
+      return;
+    }
+  }
+  setDraft(ch.id, { _skipped: 'כן' });
+  S.done[ch.id] = new Date().toISOString();
+  localStorage.setItem(DONE_KEY, JSON.stringify(S.done));
+  afterChapterDone(ch, true);
+}
+
+function afterChapterDone(ch, skipped) {
   if (ch.id === 'about') {
-    const target = S.pendingChapter;
-    S.pendingChapter = null;
     showToast('נשמר! 🙏', 'success', 1800);
-    if (target) return goChapter(target);
     return goCategories();
   }
 
@@ -690,7 +690,7 @@ async function submitChapter(ch) {
 
   const next = ch.cat ? catChapters(ch.cat).find(c => !S.done[c.id]) : null;
   if (next) {
-    showToast('נשמר! ממשיכים ← ' + next.title, 'success', 2200);
+    showToast((skipped ? 'דילגנו. ' : 'נשמר! ') + 'ממשיכים ← ' + next.title, 'success', 2200);
     goChapter(next.id);
   } else {
     const cat = catOf(ch);

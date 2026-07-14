@@ -114,16 +114,20 @@ function setRid(rid) {
 }
 
 // ── הערכת תנאי showIf ────────────────────────────────────
-// תנאי: {q, in:[..]} | {q, notIn:[..]} | {q, any:[..]}
+// פורמט מאוחד: {q, vals:[..], neg?} — מוצג אם התשובה נמצאת ב-vals
+// (בבחירה מרובה: אם יש חפיפה כלשהי). neg הופך את התנאי.
+// תומך גם בפורמט הישן: {in / notIn / any}.
 // אם אין תשובה לשאלת התנאי — מציגים (ברירת מחדל פתוחה).
 
 function evalCond(cond, answers) {
-  if (!cond) return true;
+  if (!cond || !cond.q) return true;
   const val = answers[cond.q];
   if (val === undefined || val === null || val === '' ||
       (Array.isArray(val) && val.length === 0)) return true;
-  if (cond.in)    return cond.in.includes(val);
-  if (cond.notIn) return !cond.notIn.includes(val);
-  if (cond.any)   return Array.isArray(val) && cond.any.some(o => val.includes(o));
-  return true;
+  const vals = cond.vals || cond.in || cond.any || cond.notIn || [];
+  const neg = !!cond.neg || !!cond.notIn;
+  const match = Array.isArray(val)
+    ? vals.some(v => val.includes(v))
+    : vals.includes(val);
+  return neg ? !match : match;
 }

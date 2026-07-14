@@ -58,12 +58,13 @@ async function load(password) {
     if (!res.success) { sessionStorage.removeItem('np_dash_pw'); return renderLogin(res.message); }
     sessionStorage.setItem('np_dash_pw', password);
     D.rows = res.rows; D.survey = res.survey; D.raffleCount = res.raffleCount || 0;
-    // מיזוג לפי עונה — תשובה אחרונה גוברת
+    // מיזוג לפי עונה — תשובה אחרונה גוברת; דילוגים (_skipped) לא נספרים כמענה
     D.respondents = {};
     D.rows.forEach(r => {
       D.respondents[r.rid] = D.respondents[r.rid] || { chapters: {}, answers: {} };
-      D.respondents[r.rid].chapters[r.chapter] = r.ts;
-      Object.assign(D.respondents[r.rid].answers, r.answers);
+      const realKeys = Object.keys(r.answers).filter(k => !k.startsWith('_'));
+      if (realKeys.length) D.respondents[r.rid].chapters[r.chapter] = r.ts;
+      realKeys.forEach(k => D.respondents[r.rid].answers[k] = r.answers[k]);
     });
     render();
   } catch (e) {
