@@ -14,7 +14,7 @@
 // ⚠️ אחרי כל עריכה של הקובץ הזה: ./deploy.sh "מה השתנה" (גרסה חדשה על אותה כתובת).
 // ============================================================
 
-const SHEET_ID = 'PASTE_YOUR_SHEET_ID_HERE';
+const SHEET_ID = '1Ya4TerGGhxIcl2K5ziu6xjDssB9bAn2J2oz9Ka6xm9c';
 
 // שמות הטאבים
 const T_CHAPTERS = 'פרקים';

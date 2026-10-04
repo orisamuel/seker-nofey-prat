@@ -3,10 +3,13 @@
 סקר תושבים שנתי ליישוב נופי פרת, במקום Google Forms. מובייל פירסט, RTL, אנונימי (שם רשות), כל נושא נשמר בנפרד, הגרלה למסיימים, דשבורד לצוות ודוח ציבורי מצרפי.
 
 ## איפה הוא חי
+- אתר: **https://sekernofey.online** (GitHub Pages מהענף `main`; הכתובת הישנה orisamuel.github.io/seker-nofey-prat מפנה אליו)
 - ריפו: https://github.com/orisamuel/seker-nofey-prat (ציבורי)
-- אתר: https://orisamuel.github.io/seker-nofey-prat/ (GitHub Pages, deploy from branch `main`)
-- דומיין: **sekernofey.online**, נרכש ב-Cloudflare ב-04/10/2026 (ה-DNS מנוהל שם). עוד לא מחובר לאתר, ראו "חיבור הדומיין".
-- שרת: Google Apps Script + Google Sheets. **עוד לא נפרס** (ב-`config.js` עדיין `PASTE_...`), ולכן האתר החי רץ במצב "תצוגה מקדימה": באנר צהוב, התשובות לא נשמרות אצל הצוות.
+- דומיין: נרכש ב-Cloudflare ב-04/10/2026. ה-DNS שם: 4 רשומות A ו-4 AAAA לשרתי GitHub Pages, ו-CNAME ל-www, כולן DNS only (ענן אפור). המפתח: `CLOUDFLARE_API_TOKEN` (zone id `2ba142fd76358f5b1bbb088d38a5547e`).
+- שרת: Apps Script בחשבון ori@42creative.co.il, צמוד לגיליון.
+  - גיליון: https://docs.google.com/spreadsheets/d/1Ya4TerGGhxIcl2K5ziu6xjDssB9bAn2J2oz9Ka6xm9c/edit
+  - סקריפט: https://script.google.com/d/15D01lxC92irPoJzy5Kl56qorQqtcKBK_f0nce0Si_RruRLxLs5Oht_gI/edit
+  - Web app (ב-`config.js` וב-`deploy.sh`): deployment `AKfycbyBz0e1WFXrhBSw_slxQ58ElikngdGcP9BgrC1dXRmCumXiQ1NkOVk3eGvSo03egJowfA`
 
 ## הקבצים
 | קובץ | תפקיד |
@@ -29,7 +32,7 @@
 - אחרי הפריסה, עריכה שוטפת נעשית בטאב "שאלות" בגיליון. `setup.html` דורס את הטאב, רק לזריעה מחדש מכוונת.
 
 ## פריסה (clasp, בחשבון ori@42creative.co.il)
-פעם ראשונה, מתיקיית הפרויקט:
+כבר נעשה ב-04/10/2026 (הצעדים למטה לתיעוד, או להקמה מחדש). מתיקיית הפרויקט:
 1. `npx @google/clasp@2.4.2 create --type sheets --title "סקר תושבים נופי פרת" --rootDir .`
 2. להעתיק מ-`~/.claude/skills/sheets-platform/templates/` את `appsscript.json`, `.claspignore`, `deploy.sh` (אחרי create, כי create כותב manifest בלי webapp). `.clasp.json` לא נכנס לגיט.
 3. `SHEET_ID` ב-`appscript.gs` = ה-ID של הגיליון שנוצר.
@@ -40,12 +43,8 @@
 
 כל שינוי בשרת אחר כך: `./deploy.sh "מה השתנה"` (גרסה חדשה על אותה כתובת). `deploy` בלי `-i` יוצר כתובת חדשה, לא לעשות.
 
-## חיבור הדומיין (Cloudflare → GitHub Pages)
-1. ב-Cloudflare, DNS של sekernofey.online, כולן **DNS only** (ענן אפור, אחרת GitHub לא מנפיק תעודה):
-   `A @ 185.199.108.153`, `A @ 185.199.109.153`, `A @ 185.199.110.153`, `A @ 185.199.111.153`, `CNAME www orisamuel.github.io`
-2. רק אחרי שה-DNS עונה: `gh api -X PUT repos/orisamuel/seker-nofey-prat/pages -f cname=sekernofey.online`, ואחרי שהתעודה מוכנה `-F https_enforced=true`.
-סדר חשוב: להגדיר את הדומיין ב-GitHub לפני שה-DNS עובד = האתר הקיים מפנה לכתובת שלא עונה.
-3. ב-`index.html` להחליף את `og:url` ו-`og:image` לכתובת הדומיין (תמונת השיתוף בוואטסאפ, `og.png`; המקור שלה ב-`.design/og.html`, לא בגיט).
+## הדומיין
+מחובר מ-04/10/2026. אם צריך לשחזר: הרשומות למעלה ב-Cloudflare, ואז `gh api -X PUT repos/orisamuel/seker-nofey-prat/pages -f cname=sekernofey.online` ואחרי שהתעודה מוכנה `-F https_enforced=true`. סדר חשוב: להגדיר את הדומיין ב-GitHub לפני שה-DNS עונה = האתר מפנה לכתובת שלא עונה. תמונת השיתוף (`og.png`) מוגדרת ב-`index.html` על הדומיין; המקור שלה ב-`.design/og.html` (לא בגיט).
 
 ## החלטות שכדאי לזכור
 - **הסטאק נשאר** (אתר סטטי + Apps Script + Sheets). הוועדות עורכות שאלות ורואות תוצאות בגיליון, 0 ₪, וזה מספיק בגדול ל-300 משקי בית. הנימוק המלא ב-`DECISIONS.md`.
