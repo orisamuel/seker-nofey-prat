@@ -19,6 +19,7 @@
 | `dashboard.html` | דשבורד צוות (סיסמה מטאב "הגדרות") |
 | `report.html` | דוח ציבורי, נפתח רק כש-`publicReport` = כן |
 | `setup.html` | זריעת השאלות מ-`survey-data.js` לגיליון |
+| `og.png` | תמונת השיתוף בוואטסאפ (1200x630) |
 | `tests/` | בדיקות: `node tests/validate-survey.js`, `node tests/backend.test.js` (825 בדיקות מול גיליון מדומה) |
 | `קובץ שאלות 270926.xlsx` | המקור מהוועדות. לא בגיט (ריפו ציבורי + הערות פנימיות) |
 
@@ -44,6 +45,7 @@
    `A @ 185.199.108.153`, `A @ 185.199.109.153`, `A @ 185.199.110.153`, `A @ 185.199.111.153`, `CNAME www orisamuel.github.io`
 2. רק אחרי שה-DNS עונה: `gh api -X PUT repos/orisamuel/seker-nofey-prat/pages -f cname=sekernofey.online`, ואחרי שהתעודה מוכנה `-F https_enforced=true`.
 סדר חשוב: להגדיר את הדומיין ב-GitHub לפני שה-DNS עובד = האתר הקיים מפנה לכתובת שלא עונה.
+3. ב-`index.html` להחליף את `og:url` ו-`og:image` לכתובת הדומיין (תמונת השיתוף בוואטסאפ, `og.png`; המקור שלה ב-`.design/og.html`, לא בגיט).
 
 ## החלטות שכדאי לזכור
 - **הסטאק נשאר** (אתר סטטי + Apps Script + Sheets). הוועדות עורכות שאלות ורואות תוצאות בגיליון, 0 ₪, וזה מספיק בגדול ל-300 משקי בית. הנימוק המלא ב-`DECISIONS.md`.
