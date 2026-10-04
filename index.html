@@ -391,7 +391,7 @@ function goChapter(chId) {
   if (ch.intro) container.append(el('p', { class: 'ch-intro' }, ch.intro));
 
   const qWrap = el('div', {});
-  ch.questions.forEach(q => qWrap.append(renderQuestion(ch, q, answers)));
+  withMore(ch).forEach(q => qWrap.append(renderQuestion(ch, q, answers)));
   container.append(qWrap);
 
   if (ch.outro) container.append(el('p', { class: 'ch-outro' }, ch.outro));
@@ -416,7 +416,7 @@ function goChapter(chId) {
 
 function refreshVisibility(ch) {
   const ans = Object.assign(allAnswers(), getDraft(ch.id));
-  ch.questions.forEach(q => {
+  withMore(ch).forEach(q => {
     const node = document.getElementById('q_' + q.id);
     if (node) node.classList.toggle('hidden-q', !evalCond(q.showIf, ans));
   });
@@ -683,7 +683,7 @@ async function submitChapter(ch) {
   const answers = getDraft(ch.id);
   const ctx = Object.assign(allAnswers(), answers);
   const visAns = {};
-  ch.questions.forEach(q => {
+  withMore(ch).forEach(q => {
     if (evalCond(q.showIf, ctx) && answers[q.id] !== undefined) visAns[q.id] = answers[q.id];
   });
 

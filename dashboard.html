@@ -18,7 +18,7 @@
 
 <header class="topbar wide-bar">
   <div class="topbar-in">
-    <span class="brand"><span class="brand-dot"></span> דשבורד הצוות · נופי פרת</span>
+    <span class="brand">דשבורד הצוות · נופי פרת</span>
     <div class="spacer"></div>
     <a class="btn btn-ghost btn-sm" id="sheetLink" href="#" target="_blank" rel="noopener">פתיחת הגיליון</a>
   </div>
@@ -27,7 +27,17 @@
 <main class="wrap wide" id="app"></main>
 
 <script>
-const D = { rows: [], survey: null, raffleCount: 0, respondents: {}, currentTab: 'overview' };
+const D = {
+  rows: [], survey: null, raffleCount: 0, respondents: {}, currentTab: 'overview',
+  filterDim: '', filter: null,   // פילוח: שאלת פרופיל + ערך נבחר
+};
+
+const MIN_GROUP = 5;   // קבוצה קטנה מזה לא נכנסת להשוואות (רעש סטטיסטי)
+const GAP_MIN = 0.12;  // פער מינימלי להצגה, כחלק מטווח הסולם (בסולם 1–10: בערך נקודה)
+const DIM_LABEL = {
+  about_age: 'גיל', about_kids: 'ילדים בבית', about_seniority: 'ותק ביישוב',
+  about_housing: 'מגורים', about_gender: 'מגדר', about_aguda: 'חברות באגודה',
+};
 
 init();
 
@@ -44,6 +54,7 @@ function renderLogin(err) {
     el('h2', { class: 'mb' }, 'כניסת צוות'),
     err ? el('p', { class: 'small', style: 'color:var(--danger)' }, err) : null,
     pwIn,
+    el('p', { class: 'small muted mt' }, 'הסיסמה נמצאת בטאב "הגדרות" בגיליון.'),
     el('button', { class: 'btn btn-primary btn-block mt', onclick: () => load(pwIn.value) }, 'כניסה')
   );
   document.getElementById('app').replaceChildren(view);
@@ -59,13 +70,15 @@ async function load(password) {
     if (!res.success) { sessionStorage.removeItem('np_dash_pw'); return renderLogin(res.message); }
     sessionStorage.setItem('np_dash_pw', password);
     D.rows = res.rows; D.survey = res.survey; D.raffleCount = res.raffleCount || 0;
-    // מיזוג לפי עונה — תשובה אחרונה גוברת; דילוגים (_skipped) לא נספרים כמענה
+    // מיזוג לפי עונה: תשובה אחרונה גוברת. דילוג (_skipped) נספר בנפרד ולא כמענה
     D.respondents = {};
     D.rows.forEach(r => {
-      D.respondents[r.rid] = D.respondents[r.rid] || { chapters: {}, answers: {} };
+      const p = D.respondents[r.rid] = D.respondents[r.rid] || { chapters: {}, skipped: {}, answers: {}, first: r.ts };
+      if (r.ts < p.first) p.first = r.ts;
       const realKeys = Object.keys(r.answers).filter(k => !k.startsWith('_'));
-      if (realKeys.length) D.respondents[r.rid].chapters[r.chapter] = r.ts;
-      realKeys.forEach(k => D.respondents[r.rid].answers[k] = r.answers[k]);
+      if (realKeys.length) { p.chapters[r.chapter] = r.ts; delete p.skipped[r.chapter]; }
+      else if (r.answers._skipped) p.skipped[r.chapter] = r.ts;
+      realKeys.forEach(k => p.answers[k] = r.answers[k]);
     });
     render();
   } catch (e) {
@@ -75,15 +88,74 @@ async function load(password) {
   }
 }
 
-function answersOf(qId) {
-  return Object.values(D.respondents)
+// ── פילוח ─────────────────────────────────────────────────
+
+function profileDims() {
+  const about = D.survey.chapters.find(c => c.id === 'about');
+  return about ? about.questions.filter(q => (q.type === 'radio' || q.type === 'checkbox') && q.opts && q.opts.length) : [];
+}
+
+function dimLabel(d) { return DIM_LABEL[d.id] || d.text; }
+
+function inGroup(r, qId, v) {
+  const a = r.answers[qId];
+  return Array.isArray(a) ? a.includes(v) : a === v;
+}
+
+function allRespondents() { return Object.values(D.respondents); }
+
+// העונים שבפילוח הנוכחי (או כולם)
+function pool() {
+  const all = allRespondents();
+  return D.filter ? all.filter(r => inGroup(r, D.filter.q, D.filter.v)) : all;
+}
+
+function answersOf(qId, list) {
+  return (list || pool())
     .map(r => r.answers[qId])
     .filter(v => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && !v.length));
 }
 
+function chapterRespondents(chId) { return pool().filter(r => r.chapters[chId]).length; }
+
+function chapterSkips(chId) { return pool().filter(r => r.skipped[chId]).length; }
+
+function renderFilter() {
+  const dims = profileDims();
+  if (!dims.length) return null;
+  const all = allRespondents();
+  const sel = el('select', {
+    class: 'txt-input', style: 'max-width:210px; padding:9px 12px', 'aria-label': 'פילוח לפי',
+    onchange: e => { D.filterDim = e.target.value; D.filter = null; render(); }
+  },
+    el('option', { value: '' }, 'כל העונים'),
+    ...dims.map(d => el('option', { value: d.id }, 'לפי ' + dimLabel(d))));
+  sel.value = D.filterDim;
+
+  const card = el('div', { class: 'card', style: 'padding:14px 16px' },
+    el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap' },
+      el('b', {}, 'פילוח'), sel,
+      D.filter ? el('span', { class: 'small muted' }, 'מציג ' + pool().length + ' מתוך ' + all.length + ' עונים') : null));
+
+  const d = dims.find(x => x.id === D.filterDim);
+  if (d) {
+    card.append(el('div', { class: 'pill-tabs', style: 'margin:12px 0 0' },
+      ...d.opts.map(v => {
+        const n = all.filter(r => inGroup(r, d.id, v)).length;
+        const on = !!(D.filter && D.filter.v === v);
+        return el('button', { class: 'pill-tab' + (on ? ' sel' : ''), onclick: () => { D.filter = on ? null : { q: d.id, v }; render(); } },
+          v, el('span', { style: 'opacity:.7' }, ' ' + n));
+      })));
+  }
+  return card;
+}
+
+// ── מסך ראשי ─────────────────────────────────────────────
+
 function render() {
-  const rids = Object.keys(D.respondents);
+  const list = pool();
   const app = document.getElementById('app');
+  const submitted = list.reduce((a, r) => a + Object.keys(r.chapters).length, 0);
 
   const tabs = el('div', { class: 'pill-tabs' });
   const mkTab = (id, ...label) => el('button', {
@@ -95,18 +167,19 @@ function render() {
 
   const kids = [
     el('div', { class: 'stat-row', style: 'margin-top:20px' },
-      statTile(rids.length, 'עונים'),
-      statTile(D.rows.length, 'פרקים שהוגשו'),
-      statTile(rids.length ? (D.rows.length / rids.length).toFixed(1) : '0', 'פרקים לעונה בממוצע'),
+      statTile(list.length, D.filter ? 'עונים בפילוח' : 'עונים'),
+      statTile(submitted, 'נושאים שנענו'),
+      statTile(list.length ? (submitted / list.length).toFixed(1) : '0', 'נושאים לעונה בממוצע'),
       statTile(D.raffleCount, 'נרשמו להגרלה'),
     ),
+    renderFilter(),
     tabs,
   ];
 
-  if (D.currentTab === 'overview') kids.push(renderOverview());
+  if (D.currentTab === 'overview') kids.push(renderOverview(list));
   else {
     const ch = D.survey.chapters.find(c => c.id === D.currentTab);
-    if (ch) kids.push(renderChapter(ch));
+    if (ch) kids.push(renderChapter(ch, list));
   }
 
   app.replaceChildren(el('div', { class: 'fade-in' }, ...kids));
@@ -116,48 +189,120 @@ function statTile(num, lbl) {
   return el('div', { class: 'stat-tile' }, el('div', { class: 'num' }, String(num)), el('div', { class: 'lbl' }, lbl));
 }
 
-function renderOverview() {
+function renderOverview(list) {
   const wrap = el('div', {});
-  // כמה ענו על כל פרק
-  const card = el('div', { class: 'card' }, el('h3', { class: 'mb' }, 'מענה לפי פרק'));
+  if (!list.length) {
+    wrap.append(el('div', { class: 'card center muted' }, 'אין עדיין עונים' + (D.filter ? ' בפילוח הזה' : '')));
+    return wrap;
+  }
+
+  wrap.append(renderPace(list));
+  wrap.append(renderGaps(list));
+
+  // כמה ענו על כל נושא, וכמה סימנו שהוא לא רלוונטי אליהם
+  const card = el('div', { class: 'card' }, el('h3', { class: 'mb' }, 'מענה לפי נושא'),
+    el('p', { class: 'small muted mb' }, 'הפס: כמה ענו. בצד: כמה סימנו "הנושא לא רלוונטי אליי".'));
   const max = Math.max(1, ...D.survey.chapters.map(ch => chapterRespondents(ch.id)));
   D.survey.chapters.forEach(ch => {
-    const n = chapterRespondents(ch.id);
+    const n = chapterRespondents(ch.id), sk = chapterSkips(ch.id);
     card.append(el('div', { class: 'bar-row' },
       el('div', {},
         el('div', { class: 'bar-name' }, icon(ch.icon || 'list-checks'), ch.title),
         el('div', { class: 'bar-track' }, el('div', { class: 'bar-fill', style: 'width:' + Math.round((n / max) * 100) + '%' }, String(n)))
       ),
-      el('button', { class: 'btn btn-ghost btn-sm', onclick: () => { D.currentTab = ch.id; render(); } }, 'פירוט')
+      el('span', { style: 'display:flex; align-items:center; gap:8px' },
+        sk ? el('span', { class: 'small muted' }, sk + ' דילגו') : null,
+        el('button', { class: 'btn btn-ghost btn-sm', onclick: () => { D.currentTab = ch.id; render(); } }, 'פירוט'))
     ));
   });
   wrap.append(card);
 
-  // ציוני הסולמות הנמוכים/גבוהים ביותר — מבט מהיר על חוזקות וכאבים.
-  // מדרגים לפי ציון מנורמל (0–1), כדי שסולם 1–7 לא ייראה "נמוך" ליד סולמות 1–10.
+  // ציוני הסולמות הנמוכים/הגבוהים ביותר. מדרגים לפי ציון מנורמל, כדי שסולם 1–7 לא ייראה "נמוך" ליד 1–10
   const scales = [];
   D.survey.chapters.forEach(ch => ch.questions.forEach(q => {
     if (q.type !== 'scale') return;
-    const vals = answersOf(q.id).map(Number).filter(n => !isNaN(n));
+    const vals = answersOf(q.id, list).map(Number).filter(n => !isNaN(n));
     if (vals.length < 3) return;
     const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
     scales.push({ ch, q, n: vals.length, avg, norm: normScore(avg, q) });
   }));
   scales.sort((a, b) => a.norm - b.norm);
   if (scales.length) {
-    const lows = scales.slice(0, 8), highs = scales.slice(-8).reverse();
+    const lows = scales.slice(0, 6), highs = scales.slice(-6).reverse();
     wrap.append(
-      el('div', { class: 'card' },
-        el('h3', { class: 'mb' }, 'הציונים הנמוכים ביותר: כאן כואב'),
-        ...lows.map(s => scaleRow(s))
-      ),
-      el('div', { class: 'card' },
-        el('h3', { class: 'mb' }, 'הציונים הגבוהים ביותר: מה עובד'),
-        ...highs.map(s => scaleRow(s))
-      )
+      el('div', { class: 'card' }, el('h3', { class: 'mb' }, 'הציונים הנמוכים ביותר: כאן כואב'), ...lows.map(scaleRow)),
+      el('div', { class: 'card' }, el('h3', { class: 'mb' }, 'הציונים הגבוהים ביותר: מה עובד'), ...highs.map(scaleRow))
     );
   }
   return wrap;
+}
+
+// קצב מענה: כמה עונים חדשים בכל יום (לפי ההגשה הראשונה שלהם). עוזר לתזמן תזכורות בוואטסאפ
+function renderPace(list) {
+  const key = ts => {
+    const d = new Date(ts);
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  };
+  const byDay = {};
+  list.forEach(r => { const k = key(r.first); byDay[k] = (byDay[k] || 0) + 1; });
+  const keys = Object.keys(byDay).sort();
+  const days = [];
+  for (let d = new Date(keys[0] + 'T12:00:00'), last = new Date(keys[keys.length - 1] + 'T12:00:00'); d <= last; d.setDate(d.getDate() + 1)) days.push(key(d));
+  const shown = days.slice(-30);
+  const max = Math.max(1, ...shown.map(k => byDay[k] || 0));
+  const bars = el('div', { style: 'display:flex; gap:4px; align-items:flex-end; height:112px; direction:ltr' },
+    ...shown.map(k => {
+      const n = byDay[k] || 0;
+      return el('div', { style: 'flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%', title: k + ': ' + n },
+        n ? el('div', { style: 'font-size:11px; color:var(--ink-soft)' }, String(n)) : null,
+        el('div', { style: 'width:100%; max-width:44px; border-radius:5px 5px 0 0; background:var(--teal); opacity:' + (n ? 1 : .15) + '; height:' + (n ? Math.max(6, (n / max) * 80) : 3) + 'px' }),
+        el('div', { class: 'muted', style: 'font-size:10.5px; margin-top:3px; white-space:nowrap' }, k.slice(8) + '/' + k.slice(5, 7)));
+    }));
+  return el('div', { class: 'card' }, el('h3', { class: 'mb' }, 'קצב מענה'),
+    el('p', { class: 'small muted mb' }, 'עונים חדשים בכל יום' + (days.length > 30 ? ' (30 הימים האחרונים)' : '')), bars);
+}
+
+// לכל שאלת סולם ולכל ממד בפרופיל: ממוצע לכל קבוצה (רק קבוצות עם 5 עונים לפחות), והפער בין הגבוהה לנמוכה
+function gapsFor(list, onlyQ) {
+  const out = [];
+  const dims = profileDims().filter(d => !D.filter || D.filter.q !== d.id);
+  D.survey.chapters.forEach(ch => ch.questions.forEach(q => {
+    if (q.type !== 'scale' || (onlyQ && q.id !== onlyQ)) return;
+    const lo = q.min || 1, hi = q.max || 10;
+    dims.forEach(d => {
+      const groups = d.opts.map(v => {
+        const nums = list.filter(r => inGroup(r, d.id, v) && r.answers[q.id] !== undefined)
+          .map(r => Number(r.answers[q.id])).filter(n => !isNaN(n));
+        return { v, n: nums.length, avg: nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0 };
+      }).filter(g => g.n >= MIN_GROUP);
+      if (groups.length < 2) return;
+      groups.sort((a, b) => a.avg - b.avg);
+      const low = groups[0], high = groups[groups.length - 1];
+      out.push({ ch, q, d, low, high, gap: high.avg - low.avg, norm: (high.avg - low.avg) / (hi - lo) });
+    });
+  }));
+  return out.sort((a, b) => b.norm - a.norm);
+}
+
+function gapLine(g) {
+  return el('div', { class: 'small', style: 'color:var(--ink-soft)' },
+    'לפי ' + dimLabel(g.d) + ': ', el('b', {}, g.high.v), ' ' + g.high.avg.toFixed(1) + ' (' + g.high.n + ' עונים) מול ',
+    el('b', {}, g.low.v), ' ' + g.low.avg.toFixed(1) + ' (' + g.low.n + ')');
+}
+
+function renderGaps(list) {
+  const gaps = gapsFor(list).filter(g => g.norm >= GAP_MIN).slice(0, 8);
+  const card = el('div', { class: 'card' }, el('h3', { class: 'mb' }, 'פערים בולטים בין קבוצות'));
+  if (!gaps.length) {
+    card.append(el('p', { class: 'small muted' }, 'יופיע כשיהיו לפחות ' + MIN_GROUP + ' עונים בכל קבוצה (למשל לפי גיל או ותק) ויהיה ביניהן הבדל של ממש.'));
+    return card;
+  }
+  card.append(el('p', { class: 'small muted mb' }, 'איפה קבוצות שונות ביישוב מרגישות אחרת לגבי אותו נושא.'));
+  gaps.forEach(g => card.append(el('div', { class: 'bar-row', style: 'padding:9px 0; border-bottom:1px solid var(--line)' },
+    el('div', {}, el('div', { class: 'bar-name' }, g.q.text), el('div', { class: 'small muted' }, g.ch.title), gapLine(g)),
+    el('span', { class: 'avg-chip avg-low', title: 'הפער בין הקבוצות' }, 'פער ' + g.gap.toFixed(1))
+  )));
+  return card;
 }
 
 function scaleRow(s) {
@@ -176,7 +321,7 @@ function normScore(avg, q) {
   return hi > lo ? (avg - lo) / (hi - lo) : 0;
 }
 
-// צבע לפי הציון המנורמל (בסולם 1–10: 7 ומעלה ירוק, 5 ומעלה צהוב). בסולם שאינו 1–10 מוצג גם הטווח.
+// צבע לפי הציון המנורמל (בסולם 1–10: 7 ומעלה ירוק, 5 ומעלה צהוב). בסולם שאינו 1–10 מוצג גם הטווח
 function avgChip(avg, q) {
   const n = normScore(avg, q || {});
   const cls = n >= 6 / 9 ? 'avg-good' : n >= 4 / 9 ? 'avg-mid' : 'avg-low';
@@ -184,19 +329,18 @@ function avgChip(avg, q) {
   return el('span', { class: 'avg-chip ' + cls }, avg.toFixed(1) + (hi !== 10 ? '/' + hi : ''));
 }
 
-function chapterRespondents(chId) {
-  return Object.values(D.respondents).filter(r => r.chapters[chId]).length;
-}
+// ── נושא בודד ────────────────────────────────────────────
 
-function renderChapter(ch) {
+function renderChapter(ch, list) {
   const wrap = el('div', {});
+  const sk = chapterSkips(ch.id);
   wrap.append(el('div', { class: 'chapters-head' },
     el('h2', {}, icon(ch.icon || 'list-checks'), ch.title),
-    el('p', {}, chapterRespondents(ch.id) + ' עונים הגישו את הפרק')
+    el('p', {}, chapterRespondents(ch.id) + ' עונים ענו על הנושא' + (sk ? ', ' + sk + ' סימנו שהוא לא רלוונטי אליהם' : ''))
   ));
 
-  ch.questions.forEach(q => {
-    const vals = answersOf(q.id);
+  withMore(ch).forEach(q => {
+    const vals = answersOf(q.id, list);
     const card = el('div', { class: 'card' },
       el('p', { class: 'q-text' }, q.text),
       el('p', { class: 'small muted mb' }, vals.length + ' תשובות')
@@ -206,7 +350,9 @@ function renderChapter(ch) {
     if (q.type === 'scale' || q.type === 'number') {
       const nums = vals.map(Number).filter(n => !isNaN(n));
       const avg = nums.reduce((a, b) => a + b, 0) / nums.length;
-      card.append(el('div', { class: 'mb' }, q.type === 'scale' ? avgChip(avg, q) : el('span', { class: 'avg-chip avg-mid' }, avg.toFixed(1)), el('span', { class: 'small muted' }, '  ממוצע')));
+      card.append(el('div', { class: 'mb' },
+        q.type === 'scale' ? avgChip(avg, q) : el('span', { class: 'avg-chip avg-mid' }, avg.toFixed(1)),
+        el('span', { class: 'small muted' }, '  ממוצע')));
       if (q.type === 'scale') {
         const hist = {};
         nums.forEach(n => hist[n] = (hist[n] || 0) + 1);
@@ -215,19 +361,19 @@ function renderChapter(ch) {
         for (let v = q.min || 1; v <= (q.max || 10); v++) {
           const h = hist[v] ? Math.max(8, (hist[v] / maxH) * 60) : 3;
           histWrap.append(el('div', { style: 'flex:1; text-align:center' },
-            el('div', { style: 'background:var(--primary); opacity:' + (hist[v] ? '.85' : '.15') + '; border-radius:4px 4px 0 0; height:' + h + 'px', title: hist[v] || 0 }),
+            el('div', { style: 'background:var(--teal); opacity:' + (hist[v] ? '.85' : '.15') + '; border-radius:4px 4px 0 0; height:' + h + 'px', title: hist[v] || 0 }),
             el('div', { class: 'small muted', style: 'font-size:.7rem' }, String(v))
           ));
         }
         card.append(histWrap);
         card.append(el('div', { class: 'scale-labels' }, el('span', {}, q.minLabel || ''), el('span', {}, q.maxLabel || '')));
+        // הפער הכי גדול בשאלה הזו בין קבוצות
+        const g = gapsFor(list, q.id)[0];
+        if (g && g.norm >= GAP_MIN) card.append(el('div', { class: 'mt', style: 'background:var(--paper); border-radius:12px; padding:10px 12px' }, gapLine(g)));
       }
     } else if (q.type === 'radio' || q.type === 'checkbox') {
       const counts = {};
-      vals.forEach(v => (Array.isArray(v) ? v : [v]).forEach(o => {
-        const key = String(o).startsWith('אחר: ') ? o : String(o);
-        counts[key] = (counts[key] || 0) + 1;
-      }));
+      vals.forEach(v => (Array.isArray(v) ? v : [v]).forEach(o => { counts[String(o)] = (counts[String(o)] || 0) + 1; }));
       const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
       const maxC = entries[0][1];
       entries.forEach(([opt, n]) => {

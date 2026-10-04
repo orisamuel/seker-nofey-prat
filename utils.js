@@ -118,6 +118,17 @@ function setRid(rid) {
   localStorage.setItem(RID_KEY, rid.toUpperCase().trim());
 }
 
+// ── "משהו שהיית רוצה להוסיף?" בסוף כל נושא ────────────────
+// נוסף לכל נושא בקוד ולא בגיליון, כדי שיופיע תמיד בלי לזרוע מחדש. לא בפרופיל, ולא בפאב
+// שכבר מסתיים בפידבק פתוח. שאלה בגיליון עם אותו id (למשל post_more) מחליפה את זו האוטומטית.
+const MORE_SKIP = ['about', 'pub'];
+
+function withMore(ch) {
+  const qs = ch.questions || [];
+  if (MORE_SKIP.includes(ch.id) || qs.some(q => q.id === ch.id + '_more')) return qs;
+  return qs.concat({ id: ch.id + '_more', type: 'textarea', text: 'משהו שהיית רוצה להוסיף?' });
+}
+
 // ── הערכת תנאי showIf ────────────────────────────────────
 // פורמט מאוחד: {q, vals:[..], neg?} — מוצג אם התשובה נמצאת ב-vals
 // (בבחירה מרובה: אם יש חפיפה כלשהי). neg הופך את התנאי.
