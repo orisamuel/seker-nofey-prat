@@ -92,6 +92,7 @@ const props = {};
 const cache = {};
 const triggers = [];
 const logs = [];
+const mails = [];  // מיילים ש-MailApp "שלח"
 
 const ctx = {
   SpreadsheetApp: { openById: () => SS },
@@ -99,7 +100,11 @@ const ctx = {
   Utilities: {
     getUuid: () => crypto.randomUUID(),
     computeHmacSha256Signature: (value, key) => Array.from(crypto.createHmac('sha256', key).update(value, 'utf8').digest()).map(b => (b > 127 ? b - 256 : b)),
+    computeDigest: (alg, value) => Array.from(crypto.createHash('sha256').update(value, 'utf8').digest()).map(b => (b > 127 ? b - 256 : b)),
+    DigestAlgorithm: { SHA_256: 'SHA_256' },
+    Charset: { UTF_8: 'UTF_8' },
   },
+  MailApp: { sendEmail: (m) => { mails.push(m); }, getRemainingDailyQuota: () => 1500 },
   CacheService: { getScriptCache: () => ({ get: k => (k in cache ? cache[k] : null), put: (k, v) => { cache[k] = v; }, remove: k => { delete cache[k]; } }) },
   PropertiesService: { getScriptProperties: () => ({ getProperty: k => (k in props ? props[k] : null), setProperty: (k, v) => { props[k] = v; } }) },
   ScriptApp: {
@@ -113,6 +118,6 @@ const ctx = {
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(path.join(ROOT, 'appscript.gs'), 'utf8'), ctx);
 
-return { ctx, SS, props, cache, triggers, logs };
+return { ctx, SS, props, cache, triggers, logs, mails };
 }
 module.exports = { createGas };

@@ -9,7 +9,7 @@
   <meta property="og:type" content="website">
   <meta property="og:locale" content="he_IL">
   <meta property="og:title" content="מה דעתך, נופי פרת? סקר התושבים תשפ״ז">
-  <meta property="og:description" content="בערך 10 דקות. התשובות שלך קובעות איך היישוב ייראה בשנה הקרובה. בין המסיימים מוגרל שובר של 150 ₪ לפרתיה.">
+  <meta property="og:description" content="בערך 10 דקות. התשובות שלך קובעות איך היישוב ייראה בשנה הקרובה. בין המסיימים מוגרל שובר של 150 ₪ למימוש בפרתיה.">
   <!-- תמונת השיתוף בוואטסאפ -->
   <meta property="og:url" content="https://sekernofey.online/">
   <meta property="og:image" content="https://sekernofey.online/og.png">
@@ -44,6 +44,7 @@
     <div class="spacer"></div>
     <div class="progress-rail" aria-hidden="true"><div class="progress-fill" id="progressFill"></div></div>
     <span class="progress-label" id="progressLabel"></span>
+    <button class="topbar-btn save-later" onclick="showLaterModal()" title="שמירה והמשך אחר כך"><span data-icon="bookmark"></span>אמשיך אחר כך</button>
     <button class="topbar-btn icon-only" onclick="showFaq()" aria-label="שאלות ותשובות" title="שאלות ותשובות"><span data-icon="circle-help"></span></button>
   </div>
 </header>
@@ -87,6 +88,16 @@ async function init() {
 
   // מציגים מיד מהקובץ המוטמע, בלי לחכות לשרת (התעוררות של Apps Script לוקחת כמה שניות)
   S.survey = window.SURVEY_DATA;
+
+  // נכנסו מקישור "אמשיך אחר כך" במייל: טוענים את ההתקדמות מהשרת לפני שמציגים משהו
+  const token = new URLSearchParams(location.search).get('r');
+  if (token) {
+    history.replaceState(null, '', location.pathname); // הקישור האישי לא נשאר בשורת הכתובת
+    if (S.serverMode) {
+      document.getElementById('loadingText').textContent = 'ממשיכים מאיפה שעצרתם…';
+      await resumeFromLink(token);
+    }
+  }
   document.getElementById('loadingScreen').classList.add('hidden');
   goHome();
 
@@ -224,6 +235,8 @@ function goLanding() {
   const m = S.survey.meta;
   const view = el('div', { class: 'land' },
     poster(m, null, m.tagline, true),
+    el('div', { class: 'raffle-strip land-raffle' },
+      el('span', { class: 'r-icon' }, icon('gift')), el('span', { class: 'txt' }, m.raffle.text)),
     el('div', { class: 'land-cta' },
       el('button', { class: 'btn btn-primary btn-block', onclick: startSurvey }, 'מתחילים', icon('arrow-left'))
     ),
@@ -794,6 +807,71 @@ function afterChapterDone(ch, skipped) {
 
 function validPhone(p) {
   return /^0\d{8,9}$/.test(p.replace(/[^0-9]/g, ''));
+}
+
+// ── "אמשיך אחר כך": קישור אישי במייל ───────────────────
+// המייל לא נשמר. השרת שולח קישור עם טוקן סודי, ופתיחתו בכל מכשיר טוענת את הנושאים ששמרו.
+
+function validEmail(e) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
+}
+
+function showLaterModal() {
+  const emailIn = el('input', { class: 'txt-input', type: 'email', inputmode: 'email', autocomplete: 'email', dir: 'ltr', placeholder: 'name@example.com', 'aria-label': 'כתובת מייל', style: 'text-align:center' });
+  const send = async (e) => {
+    const b = e.currentTarget; // הכפתור עצמו, גם כשלוחצים על האייקון שבתוכו
+    const email = emailIn.value.trim();
+    if (!validEmail(email)) { showToast('בדקו את כתובת המייל', 'warning'); return; }
+    if (!S.serverMode) { showToast('יעבוד אחרי חיבור המערכת לשרת', 'warning'); return; }
+    b.disabled = true;
+    b.textContent = 'שולח…';
+    try {
+      const res = await apiPost('sendResumeLink', { email, rid: getRid() });
+      if (!res.success) throw new ServerSaid(res.message);
+      closeModal();
+      showToast('שלחנו! הקישור מחכה במייל. לא הגיע? בדקו גם בספאם', 'success', 6000);
+    } catch (err) {
+      b.disabled = false;
+      b.replaceChildren('שליחת קישור', icon('send'));
+      showToast(err instanceof ServerSaid && err.message ? err.message : 'לא הצליח, נסו שוב', 'error');
+    }
+  };
+  const modal = el('div', { class: 'modal' },
+    el('h3', {}, icon('bookmark'), 'ממשיכים מתי שנוח'),
+    el('p', {}, 'ההתקדמות נשמרת אוטומטית במכשיר הזה, אפשר פשוט לסגור ולחזור.'),
+    el('p', {}, el('strong', {}, 'רוצים להמשיך אחר כך או ממכשיר אחר?'), ' השאירו מייל ונשלח לכם קישור אישי שממשיך בדיוק מאיפה שעצרתם.'),
+    emailIn,
+    el('p', { class: 'small muted mt' }, 'המייל לא נשמר אצלנו, הוא משמש רק לשליחת הקישור. הקישור ממשיך מהנושא האחרון ששמרתם.'),
+    el('div', { class: 'modal-actions' },
+      el('button', { class: 'btn btn-primary', onclick: send }, 'שליחת קישור', icon('send')),
+      el('button', { class: 'btn btn-ghost', onclick: closeModal }, 'סגירה')
+    )
+  );
+  openModal(modal);
+  emailIn.addEventListener('keydown', ev => { if (ev.key === 'Enter') modal.querySelector('.btn-primary').click(); });
+}
+
+async function resumeFromLink(token) {
+  try {
+    const res = await apiPost('resumeByToken', { token });
+    if (!res.success) throw new ServerSaid(res.message);
+    // קישור של עונה אחר ממה שיש במכשיר: מתחילים מהמצב שבשרת, בלי טיוטות של הזהות הקודמת
+    if (getRid() !== res.rid) {
+      Object.keys(localStorage).filter(k => k.startsWith('np_draft_')).forEach(k => localStorage.removeItem(k));
+      localStorage.removeItem(RAFFLE_KEY);
+      S.raffleEntered = false;
+    }
+    setRid(res.rid);
+    S.done = {};
+    for (const [chId, data] of Object.entries(res.chapters || {})) {
+      S.done[chId] = data.ts || new Date().toISOString();
+      setDraft(chId, data.answers || {});
+    }
+    localStorage.setItem(DONE_KEY, JSON.stringify(S.done));
+    showToast('ברוכים השבים! ממשיכים מאיפה שעצרתם 👋', 'success', 3500);
+  } catch (e) {
+    showToast(e instanceof ServerSaid && e.message ? e.message : 'לא הצלחנו לפתוח את הקישור. נסו שוב', 'error', 6000);
+  }
 }
 
 // ── התחלה מחדש ──────────────────────────────────────────

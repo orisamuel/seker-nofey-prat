@@ -6,7 +6,7 @@ const vm = require('vm');
 const ROOT = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 
 const { createGas } = require('./mock-gas.js');
-const { ctx, SS, props, cache, triggers, logs } = createGas(ROOT);
+const { ctx, SS, props, cache, triggers, logs, mails } = createGas(ROOT);
 
 const sctx = { window: {} };
 vm.createContext(sctx);
@@ -94,12 +94,45 @@ check('system chapter name rejected', !r.success);
 r = post({ action: 'submitChapter', rid: A, chapter: 'community', answers: { brand_new_q: 'x' } });
 check('new question column added on the fly', r.success && flat.rows[0].includes('brand_new_q'), r);
 
-// ── 5. אין המשך ממכשיר אחר (הוסר כשהשאלון התקצר): שום פעולה לא מחזירה תשובות לפי טלפון או קוד עונה ──
+// ── 5. "אמשיך אחר כך": קישור אישי במייל ──
+// פעולות הטלפון הישנות לא חשופות, ואין פעולה שמחזירה תשובות לפי קוד עונה
 for (const action of ['linkResume', 'resumeByPhone', 'resumeByHash', 'resume']) {
   r = post({ action, rid: A, phone: '0541234567', pin: '1234' });
   check(action + ' not exposed', !r.success && /Unknown action/.test(r.message), r);
 }
-check('no resume-links tab', !SS.getSheetByName('קודי המשך'));
+r = post({ action: 'sendResumeLink', email: 'not-an-email', rid: A });
+check('bad email rejected', !r.success && mails.length === 0, r);
+r = post({ action: 'sendResumeLink', email: 'Dana@Example.co.il ', rid: A });
+check('link sent', r.success && mails.length === 1, r);
+const mail = mails[0];
+const linkMatch = /https:\/\/sekernofey\.online\/\?r=([a-f0-9]{64})/.exec(mail.body);
+check('mail to the address, from no-reply, with a link on our domain', mail.to === 'dana@example.co.il' && mail.noReply === true && !!linkMatch && mail.htmlBody.includes(linkMatch[0]), mail);
+const token = linkMatch && linkMatch[1];
+const linksTab = SS.getSheetByName('קישורי המשך');
+check('email not stored anywhere in the sheet', !JSON.stringify(Object.values(SS.sheets).map(sh => sh.rows)).toLowerCase().includes('dana@example'));
+check('token not stored in clear', !JSON.stringify(linksTab.rows).includes(token));
+r = post({ action: 'resumeByToken', token });
+check('resume by token', r.success && r.rid === A && r.chapters.community.answers.comm_belong === 7, r);
+r = post({ action: 'resumeByToken', token: token.replace(/^./, c => (c === 'a' ? 'b' : 'a')) });
+check('wrong token fails', !r.success, r);
+r = post({ action: 'resumeByToken', token: 'x' });
+check('malformed token fails', !r.success, r);
+post({ action: 'sendResumeLink', email: 'dana@example.co.il', rid: A });
+post({ action: 'sendResumeLink', email: 'dana@example.co.il', rid: A });
+r = post({ action: 'sendResumeLink', email: 'dana@example.co.il', rid: A });
+check('max 3 links per email per hour', !r.success && mails.length === 3, r);
+Object.keys(cache).forEach(k => delete cache[k]);
+// קישור לפני ששמרו נושא כלשהו: ממשיכים עם אותו קוד עונה, בלי תשובות
+const E = 'EEEEEEEE';
+r = post({ action: 'sendResumeLink', email: 'new@example.com', rid: E });
+const tokenE = /\?r=([a-f0-9]{64})/.exec(mails[mails.length - 1].body)[1];
+r = post({ action: 'resumeByToken', token: tokenE });
+check('link before any answer keeps the rid', r.success && r.rid === E && Object.keys(r.chapters).length === 0, r);
+// תוקף: קישור בן יותר מ-45 יום נדחה
+linksTab.rows.find(x => x[2] === E)[0] = new Date(Date.now() - 46 * 864e5);
+r = post({ action: 'resumeByToken', token: tokenE });
+check('expired link fails', !r.success && r.message.includes('תוקף'), r);
+check('no old phone-links tab', !SS.getSheetByName('קודי המשך'));
 
 // ── 6. הגרלה ──
 r = post({ action: 'enterRaffle', rid: A, name: 'ישראל ישראלי', phone: '0541234567' });
@@ -129,6 +162,10 @@ check('B in flat', flat.rows.some(x => x[0] === B));
 r = post({ action: 'discard', rid: B });
 check('discard ok', r.success, r);
 check('B removed from flat', !flat.rows.some(x => x[0] === B));
+post({ action: 'sendResumeLink', email: 'b@example.com', rid: B });
+const tokenB = /\?r=([a-f0-9]{64})/.exec(mails[mails.length - 1].body)[1];
+r = post({ action: 'resumeByToken', token: tokenB });
+check('link of a discarded respondent does not return answers', !r.success && !r.chapters, r);
 
 // ── 8. דשבורד ──
 r = post({ action: 'getResults', password: 'nope' });

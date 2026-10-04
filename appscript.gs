@@ -23,11 +23,21 @@ const T_RAW = 'תשובות גולמי';
 const T_FLAT = 'תוצאות';
 const T_RAFFLE = 'הגרלה';
 const T_SETTINGS = 'הגדרות';
+const T_LINKS = 'קישורי המשך';
 
 // Schema: זמן(0), קוד עונה(1), פרק(2), תשובות JSON(3) — append-only
 const RAW_HEADERS = ['זמן', 'קוד עונה', 'פרק', 'תשובות (JSON)'];
 // Schema: שם(0), טלפון(1) — בלי זמן ובלי קוד עונה, ממוין לפי שם (אי אפשר לקשר לתשובות)
 const RAFFLE_HEADERS = ['שם', 'טלפון'];
+
+// Schema: זמן(0), טוקן מוצפן(1), קוד עונה(2). המייל עצמו לא נשמר בשום מקום
+const LINK_HEADERS = ['זמן', 'טוקן (מוצפן)', 'קוד עונה'];
+
+// "אמשיך אחר כך": הקישור נבנה תמיד מהכתובת הזו ולא ממה שהדפדפן שולח (אחרת אפשר לשלוח בשמנו קישור זדוני)
+const SITE_URL = 'https://sekernofey.online/';
+const LINK_DAYS = 45;                // תוקף קישור
+const MAX_LINKS_PER_EMAIL_HOUR = 3;  // הגנה מהצפת תיבה של מישהו
+const MAX_LINKS_PER_HOUR = 120;      // הגנה מניצול לרעה ומכסת המיילים היומית
 
 // "פרק" מיוחד בטאב הגולמי: העונה לחץ "התחלה מחדש", כל התשובות שלו לא נספרות
 const DISCARD_CH = '_בוטל';
@@ -117,6 +127,15 @@ function upsertSetting(sheet, key, value, note) {
   sheet.appendRow([key, value, note || '']);
 }
 
+function sha256Hex(str) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, str, Utilities.Charset.UTF_8)
+    .map(function (b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join('');
+}
+
+function validEmail(e) {
+  return e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
+}
+
 // ── טלפון (להגרלה) ─────────────────────────────────────
 function phoneDigits(phone) {
   const d = String(phone || '').replace(/[^0-9]/g, '');
@@ -185,6 +204,8 @@ function setup() {
   const settings = getSettings();
   ensureSheet(T_RAW, RAW_HEADERS);
   ensureSheet(T_RAFFLE, RAFFLE_HEADERS);
+  ensureSheet(T_LINKS, LINK_HEADERS);
+  Logger.log('מכסת מיילים שנשארה היום: ' + MailApp.getRemainingDailyQuota());
   const hasWarm = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'keepWarm'; });
   if (!hasWarm) ScriptApp.newTrigger('keepWarm').timeBased().everyMinutes(10).create();
   Logger.log('מוכן. סיסמת הצוות (גם בטאב "הגדרות"): ' + settings.dashboardPassword);
@@ -247,6 +268,7 @@ function seedSurvey(surveyJson, password) {
   // הכנת שאר הטאבים + כותרות הטבלה השטוחה
   ensureSheet(T_RAW, RAW_HEADERS);
   ensureSheet(T_RAFFLE, RAFFLE_HEADERS);
+  ensureSheet(T_LINKS, LINK_HEADERS);
   writeGuideSheet();
   rebuildFlatHeaders();
 
@@ -476,7 +498,7 @@ function discard(rid) {
   }
 }
 
-// כל הפרקים שהוגשו עבור עונה (שימוש פנימי: אימות ההגרלה)
+// כל הפרקים שהוגשו עבור עונה (שימוש פנימי: אימות ההגרלה, קישור המשך)
 function resume(rid) {
   try {
     rid = normRid(rid);
@@ -494,6 +516,80 @@ function resume(rid) {
     }
     if (!Object.keys(chapters).length) return { success: false, message: 'לא נמצאו תשובות' };
     return { success: true, chapters: chapters };
+  } catch (e) {
+    return { success: false, message: e.toString() };
+  }
+}
+
+// ============================================================
+// "אמשיך אחר כך": קישור אישי במייל
+// נשמר רק hash של הטוקן וקוד העונה. בלי הקישור עצמו אי אפשר לטעון תשובות.
+// ============================================================
+
+function sendResumeLink(email, rid) {
+  try {
+    email = String(email || '').trim().toLowerCase();
+    rid = normRid(rid);
+    if (!rid || !validEmail(email)) return { success: false, message: 'בדקו את כתובת המייל' };
+
+    const cache = CacheService.getScriptCache();
+    const ek = 'mail_' + sha256Hex(email).slice(0, 40);
+    const perEmail = Number(cache.get(ek) || 0);
+    if (perEmail >= MAX_LINKS_PER_EMAIL_HOUR) return { success: false, message: 'כבר שלחנו לכתובת הזו כמה קישורים. בדקו את תיבת המייל, גם בספאם' };
+    const perHour = Number(cache.get('mail_hour') || 0);
+    if (perHour >= MAX_LINKS_PER_HOUR) return { success: false, message: 'יש עומס רגעי. נסו שוב בעוד כמה דקות' };
+
+    const token = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
+    withLock(function () { ensureSheet(T_LINKS, LINK_HEADERS).appendRow([new Date(), sha256Hex(token), rid]); });
+
+    const link = SITE_URL + '?r=' + token;
+    MailApp.sendEmail({
+      to: email,
+      subject: 'הקישור שלך להמשך סקר התושבים · נופי פרת',
+      name: 'סקר התושבים נופי פרת',
+      noReply: true,
+      body: 'שלום,\n\nזה הקישור האישי שלך להמשך סקר התושבים של נופי פרת. הוא פותח את הסקר בדיוק מאיפה שעצרת, מכל מכשיר:\n' + link +
+        '\n\nהקישור אישי ותקף ל-' + LINK_DAYS + ' יום. לא להעביר אותו הלאה, כי הוא פותח את התשובות שלך.\nלא ביקשת את המייל הזה? אפשר פשוט להתעלם ממנו.\n\nועד ההנהלה ועובדי היישוב',
+      htmlBody:
+        '<div dir="rtl" style="font-family:Arial,sans-serif;font-size:16px;line-height:1.6;color:#1E2A24">' +
+        '<p>שלום,</p>' +
+        '<p>זה הקישור האישי שלך להמשך סקר התושבים של נופי פרת. הוא פותח את הסקר בדיוק מאיפה שעצרת, מכל מכשיר.</p>' +
+        '<p style="margin:22px 0"><a href="' + link + '" style="display:inline-block;background:#BF5533;color:#ffffff;padding:13px 28px;border-radius:26px;text-decoration:none;font-weight:bold">להמשך הסקר</a></p>' +
+        '<p style="color:#656C64;font-size:14px">הקישור אישי ותקף ל-' + LINK_DAYS + ' יום. לא להעביר אותו הלאה, כי הוא פותח את התשובות שלך.<br>לא ביקשת את המייל הזה? אפשר פשוט להתעלם ממנו.</p>' +
+        '<p style="color:#656C64;font-size:14px">ועד ההנהלה ועובדי היישוב</p></div>',
+    });
+
+    cache.put(ek, String(perEmail + 1), 3600);
+    cache.put('mail_hour', String(perHour + 1), 3600);
+    return { success: true };
+  } catch (e) {
+    return { success: false, message: e.toString() };
+  }
+}
+
+function resumeByToken(token) {
+  try {
+    token = String(token || '').trim().toLowerCase();
+    const BAD = { success: false, message: 'הקישור לא תקין. אפשר לבקש חדש ב"אמשיך אחר כך"' };
+    if (!/^[a-f0-9]{64}$/.test(token)) return BAD;
+    const sheet = getSpreadsheet().getSheetByName(T_LINKS);
+    if (!sheet || sheet.getLastRow() <= 1) return BAD;
+    const h = sha256Hex(token);
+    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
+    for (let i = data.length - 1; i >= 0; i--) {
+      if (String(data[i][1]) !== h) continue;
+      if (new Date().getTime() - new Date(data[i][0]).getTime() > LINK_DAYS * 864e5) {
+        return { success: false, message: 'תוקף הקישור פג. אפשר לבקש חדש ב"אמשיך אחר כך"' };
+      }
+      const rid = String(data[i][2]);
+      const raw = getSpreadsheet().getSheetByName(T_RAW);
+      const rawData = raw && raw.getLastRow() > 1 ? raw.getDataRange().getValues() : [[]];
+      if (discardedRids(rawData)[rid]) return { success: false, message: 'התשובות של הקישור הזה בוטלו ("להתחיל מחדש")' };
+      const res = resume(rid);
+      // קישור שנשלח לפני שנשמר נושא כלשהו: ממשיכים עם אותו קוד עונה, בלי תשובות
+      return { success: true, rid: rid, chapters: res.success ? res.chapters : {} };
+    }
+    return BAD;
   } catch (e) {
     return { success: false, message: e.toString() };
   }
@@ -676,7 +772,7 @@ function route(e, body) {
 
     switch (action) {
       case 'ping':
-        return jsonResponse({ success: true, version: 'v2' });
+        return jsonResponse({ success: true, version: 'v3' });
 
       case 'getSurvey':
         return jsonResponse(getSurvey());
@@ -686,6 +782,12 @@ function route(e, body) {
 
       case 'discard':
         return jsonResponse(discard(p.rid));
+
+      case 'sendResumeLink':
+        return jsonResponse(sendResumeLink(p.email, p.rid));
+
+      case 'resumeByToken':
+        return jsonResponse(resumeByToken(p.token));
 
       case 'enterRaffle':
         return jsonResponse(enterRaffle(p.rid, p.name, p.phone));

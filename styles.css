@@ -151,6 +151,11 @@ svg.ic { width: 1em; height: 1em; flex: none; display: inline-block; vertical-al
 
 .topbar-btn:hover { border-color: var(--line-strong); }
 
+/* "אמשיך אחר כך": בולט תמיד, גם במובייל */
+.topbar-btn.save-later { background: var(--ochre-soft); border-color: #E9CB8A; font-weight: 600; }
+
+.topbar-btn.save-later:hover { background: #F5E4BC; }
+
 .progress-rail { height: 6px; background: var(--paper-deep); border-radius: 99px; overflow: hidden; flex: 1; max-width: 110px; }
 
 .progress-fill { height: 100%; width: 0; background: var(--teal); border-radius: 99px; transition: width .6s cubic-bezier(.22, 1, .36, 1); }
@@ -158,9 +163,15 @@ svg.ic { width: 1em; height: 1em; flex: none; display: inline-block; vertical-al
 .progress-label { font-size: 13px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 500; }
 
 @media (max-width: 460px) {
-  .topbar-in { gap: 8px; padding-inline: 12px; }
+  .topbar-in { gap: 6px; padding-inline: 12px; }
   .brand { font-size: 27px; }
-  .progress-rail { max-width: 90px; }
+  .progress-label { display: none; }
+  .progress-rail { max-width: 44px; }
+  .topbar-btn.save-later { padding: 0 11px; font-size: 13px; }
+}
+
+@media (max-width: 360px) {
+  .progress-rail { display: none; }
 }
 
 /* באנר תצוגה מקדימה: האתר לא מחובר לשרת */
@@ -288,7 +299,9 @@ svg.ic { width: 1em; height: 1em; flex: none; display: inline-block; vertical-al
 
 .sticker-raffle svg.ic { color: var(--terra); font-size: 18px; }
 
-.land-cta { display: grid; gap: 4px; margin-top: 20px; }
+.land-raffle { margin-top: 16px; }
+
+.land-cta { display: grid; gap: 4px; margin-top: 14px; }
 
 .land-cta .link-btn { justify-self: center; }
 
@@ -695,7 +708,9 @@ textarea.txt-input { min-height: 104px; resize: vertical; }
 
 .modal-actions { display: flex; gap: 8px; margin-top: 14px; }
 
-.modal-actions .btn { flex: 1; }
+.modal-actions .btn { flex: 1; white-space: nowrap; }
+
+.modal-actions .btn-ghost { flex: 0 0 auto; padding: 0 22px; }
 
 @media (min-width: 560px) {
   .modal-back { align-items: center; padding: 18px; }
