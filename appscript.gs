@@ -22,19 +22,15 @@ const T_QUESTIONS = 'שאלות';
 const T_RAW = 'תשובות גולמי';
 const T_FLAT = 'תוצאות';
 const T_RAFFLE = 'הגרלה';
-const T_LINKS = 'קודי המשך';
 const T_SETTINGS = 'הגדרות';
 
 // Schema: זמן(0), קוד עונה(1), פרק(2), תשובות JSON(3) — append-only
 const RAW_HEADERS = ['זמן', 'קוד עונה', 'פרק', 'תשובות (JSON)'];
 // Schema: שם(0), טלפון(1) — בלי זמן ובלי קוד עונה, ממוין לפי שם (אי אפשר לקשר לתשובות)
 const RAFFLE_HEADERS = ['שם', 'טלפון'];
-// Schema: עדכון(0), מפתח טלפון(1), קוד מוצפן(2), קוד עונה(3)
-const LINK_HEADERS = ['עדכון', 'מפתח טלפון (מוצפן)', 'קוד (מוצפן)', 'קוד עונה'];
 
 // "פרק" מיוחד בטאב הגולמי: העונה לחץ "התחלה מחדש", כל התשובות שלו לא נספרות
 const DISCARD_CH = '_בוטל';
-const MAX_RESUME_TRIES = 5; // ניסיונות שגויים לטלפון, לשעה
 
 // ============================================================
 // עזרים
@@ -121,35 +117,10 @@ function upsertSetting(sheet, key, value, note) {
   sheet.appendRow([key, value, note || '']);
 }
 
-// ── טלפון להמשך ממכשיר אחר: חתימת HMAC עם מפתח סודי ────────
-// המפתח נשמר ב-Script Properties (לא בגיליון ולא בקוד), כך שמי שרואה את הגיליון
-// לא יכול לשחזר מספר מהחתימה.
-function phonePepper() {
-  const props = PropertiesService.getScriptProperties();
-  let p = props.getProperty('PHONE_PEPPER');
-  if (!p) {
-    p = withLock(function () {
-      let cur = props.getProperty('PHONE_PEPPER');
-      if (!cur) { cur = Utilities.getUuid() + Utilities.getUuid(); props.setProperty('PHONE_PEPPER', cur); }
-      return cur;
-    });
-  }
-  return p;
-}
-
-function hmacHex(value) {
-  const bytes = Utilities.computeHmacSha256Signature(value, phonePepper());
-  return bytes.map(function (b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join('');
-}
-
+// ── טלפון (להגרלה) ─────────────────────────────────────
 function phoneDigits(phone) {
   const d = String(phone || '').replace(/[^0-9]/g, '');
   return /^0\d{8,9}$/.test(d) ? d : null;
-}
-
-function phoneKey(phone) {
-  const d = phoneDigits(phone);
-  return d ? hmacHex('phone:' + d) : null;
 }
 
 // הערכת תנאי showIf — זהה ללוגיקה בצד הלקוח (utils.js)
@@ -212,10 +183,8 @@ function condToString(c) {
 
 function setup() {
   const settings = getSettings();
-  phonePepper();
   ensureSheet(T_RAW, RAW_HEADERS);
   ensureSheet(T_RAFFLE, RAFFLE_HEADERS);
-  ensureSheet(T_LINKS, LINK_HEADERS);
   const hasWarm = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'keepWarm'; });
   if (!hasWarm) ScriptApp.newTrigger('keepWarm').timeBased().everyMinutes(10).create();
   Logger.log('מוכן. סיסמת הצוות (גם בטאב "הגדרות"): ' + settings.dashboardPassword);
@@ -278,7 +247,6 @@ function seedSurvey(surveyJson, password) {
   // הכנת שאר הטאבים + כותרות הטבלה השטוחה
   ensureSheet(T_RAW, RAW_HEADERS);
   ensureSheet(T_RAFFLE, RAFFLE_HEADERS);
-  ensureSheet(T_LINKS, LINK_HEADERS);
   writeGuideSheet();
   rebuildFlatHeaders();
 
@@ -508,7 +476,7 @@ function discard(rid) {
   }
 }
 
-// כל הפרקים שהוגשו עבור עונה (שימוש פנימי: המשך ממכשיר אחר, אימות הגרלה)
+// כל הפרקים שהוגשו עבור עונה (שימוש פנימי: אימות ההגרלה)
 function resume(rid) {
   try {
     rid = normRid(rid);
@@ -526,73 +494,6 @@ function resume(rid) {
     }
     if (!Object.keys(chapters).length) return { success: false, message: 'לא נמצאו תשובות' };
     return { success: true, chapters: chapters };
-  } catch (e) {
-    return { success: false, message: e.toString() };
-  }
-}
-
-// ============================================================
-// המשך ממכשיר אחר: טלפון + קוד בן 4 ספרות
-// נשמרות חתימות מוצפנות בלבד. בלי הקוד אי אפשר לטעון תשובות של אחר, גם אם יודעים את המספר שלו.
-// ============================================================
-
-function linkResume(phone, pin, rid) {
-  try {
-    const key = phoneKey(phone);
-    rid = normRid(rid);
-    pin = String(pin || '').trim();
-    if (!key || !/^\d{4}$/.test(pin) || !rid) return { success: false, message: 'בדקו את הטלפון והקוד' };
-    const pinHash = hmacHex('pin:' + key + ':' + pin);
-    withLock(function () {
-      const sheet = ensureSheet(T_LINKS, LINK_HEADERS);
-      // upsert לפי טלפון: תמיד מצביע על העונה האחרון שקישר אותו
-      if (sheet.getLastRow() > 1) {
-        const keys = sheet.getRange(2, 2, sheet.getLastRow() - 1, 1).getValues();
-        for (let i = 0; i < keys.length; i++) {
-          if (String(keys[i][0]) === key) {
-            sheet.getRange(i + 2, 1, 1, 4).setValues([[new Date(), key, pinHash, rid]]);
-            return;
-          }
-        }
-      }
-      sheet.appendRow([new Date(), key, pinHash, rid]);
-    });
-    return { success: true };
-  } catch (e) {
-    return { success: false, message: e.toString() };
-  }
-}
-
-function resumeByPhone(phone, pin) {
-  try {
-    const key = phoneKey(phone);
-    pin = String(pin || '').trim();
-    if (!key || !/^\d{4}$/.test(pin)) return { success: false, message: 'בדקו את הטלפון והקוד' };
-
-    const cache = CacheService.getScriptCache();
-    const triesKey = 'tries_' + key.slice(0, 40);
-    const tries = Number(cache.get(triesKey) || 0);
-    if (tries >= MAX_RESUME_TRIES) return { success: false, message: 'יותר מדי ניסיונות. נסו שוב בעוד שעה' };
-    const fail = function () {
-      cache.put(triesKey, String(tries + 1), 3600);
-      return { success: false, message: 'לא מצאנו. ודאו שהטלפון והקוד זהים למה שהזנתם ב"אמשיך אחר כך"' };
-    };
-
-    const sheet = getSpreadsheet().getSheetByName(T_LINKS);
-    if (!sheet || sheet.getLastRow() <= 1) return fail();
-    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 4).getValues();
-    const pinHash = hmacHex('pin:' + key + ':' + pin);
-    for (let i = 0; i < data.length; i++) {
-      if (String(data[i][1]) !== key) continue;
-      if (String(data[i][2]) !== pinHash) return fail();
-      cache.remove(triesKey);
-      const rid = String(data[i][3]);
-      const res = resume(rid);
-      if (!res.success) return res;
-      res.rid = rid;
-      return res;
-    }
-    return fail();
   } catch (e) {
     return { success: false, message: e.toString() };
   }
@@ -785,12 +686,6 @@ function route(e, body) {
 
       case 'discard':
         return jsonResponse(discard(p.rid));
-
-      case 'linkResume':
-        return jsonResponse(linkResume(p.phone, p.pin, p.rid));
-
-      case 'resumeByPhone':
-        return jsonResponse(resumeByPhone(p.phone, p.pin));
 
       case 'enterRaffle':
         return jsonResponse(enterRaffle(p.rid, p.name, p.phone));

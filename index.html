@@ -44,8 +44,6 @@
     <div class="spacer"></div>
     <div class="progress-rail" aria-hidden="true"><div class="progress-fill" id="progressFill"></div></div>
     <span class="progress-label" id="progressLabel"></span>
-    <button class="topbar-btn save-later" onclick="showLaterModal()" title="שמירה והמשך אחר כך"><span data-icon="bookmark"></span>אמשיך אחר כך</button>
-    <button class="topbar-btn icon-only" onclick="showRestartModal()" aria-label="התחלה מחדש" title="התחלה מחדש"><span data-icon="rotate-ccw"></span></button>
     <button class="topbar-btn icon-only" onclick="showFaq()" aria-label="שאלות ותשובות" title="שאלות ותשובות"><span data-icon="circle-help"></span></button>
   </div>
 </header>
@@ -60,7 +58,8 @@
 <script>
 /* ============================================================
    סקר נופי פרת — v2
-   זרימה: נחיתה → קטגוריות → (פרופיל חד-פעמי) → פרק → הפרק הבא
+   זרימה ליניארית: נחיתה → "קצת עליך" → נושא אחרי נושא, לפי סדר התחומים.
+   מסך התחומים הוא סקירה: איפה אני, ומעבר חופשי לכל נושא.
    ============================================================ */
 
 const S = {
@@ -96,7 +95,8 @@ async function init() {
     const res = await apiCall('getSurvey');
     if (res.open === false) return goClosed();
     if (res.success && res.survey && res.survey.chapters && res.survey.chapters.length) {
-      S.survey = res.survey;
+      // השאלות מהגיליון (שם הצוות עורך), הטקסטים הכלליים (פתיח, שו"ת, הגרלה, תחומים) מהקוד
+      S.survey = { meta: window.SURVEY_DATA.meta, chapters: res.survey.chapters };
       // הגרסה מהגיליון (שהצוות אולי ערך) נכנסת לתוקף; באמצע פרק לא מרעננים כדי לא לקטוע הקלדה
       if (S.view === 'landing' || S.view === 'categories') goHome();
       else updateProgress();
@@ -171,8 +171,14 @@ function catOf(ch) {
   return S.survey.meta.categories.find(c => c.id === ch.cat) || null;
 }
 
+// התקדמות בנושאים בלבד ("קצת עליך" הוא שלב פתיחה, לא נושא)
+function topicStats() {
+  const order = orderedChapters();
+  return { done: order.filter(ch => S.done[ch.id]).length, total: order.length };
+}
+
 function updateProgress() {
-  const { done, total } = completionStats();
+  const { done, total } = topicStats();
   const pct = total ? Math.round((done / total) * 100) : 0;
   document.getElementById('progressFill').style.width = pct + '%';
   document.getElementById('progressLabel').textContent = hasStarted() ? done + '/' + total : '';
@@ -192,6 +198,26 @@ function goHome() {
   if (hasStarted()) goCategories(); else goLanding();
 }
 
+// הנושאים לפי סדר התחומים (כך עוברים עליהם ברצף), בלי "קצת עליך"
+function orderedChapters() {
+  const vis = visibleChapters();
+  return S.survey.meta.categories.flatMap(cat => vis.filter(ch => ch.cat === cat.id));
+}
+
+function nextChapter() {
+  return orderedChapters().find(ch => !S.done[ch.id]) || null;
+}
+
+function startSurvey() {
+  if (!S.done['about']) return goChapter('about');
+  goNext();
+}
+
+function goNext() {
+  const next = nextChapter();
+  if (next) goChapter(next.id); else goCategories();
+}
+
 // ── מסך פתיחה: פוסטר ─────────────────────────────────────
 
 function goLanding() {
@@ -199,8 +225,7 @@ function goLanding() {
   const view = el('div', { class: 'land' },
     poster(m, null, m.tagline, true),
     el('div', { class: 'land-cta' },
-      el('button', { class: 'btn btn-primary btn-block', onclick: goCategories }, 'מתחילים', icon('arrow-left')),
-      el('button', { class: 'link-btn', onclick: showResumeByPhone }, 'כבר התחלתי במכשיר אחר')
+      el('button', { class: 'btn btn-primary btn-block', onclick: startSurvey }, 'מתחילים', icon('arrow-left'))
     ),
     el('p', { class: 'land-note' }, m.sub)
   );
@@ -254,9 +279,16 @@ function goCategories() {
   const m = S.survey.meta;
   const stats = completionStats();
 
+  const next = nextChapter();
   const kids = [
-    el('div', { class: 'screen-head' }, el('h2', {}, 'במה מתחילים?')),
+    el('div', { class: 'screen-head' },
+      el('h2', {}, stats.complete ? 'סיימתם, תודה!' : stats.done ? 'ממשיכים?' : 'במה מתחילים?'),
+      el('p', {}, topicStats().done + ' מתוך ' + topicStats().total + ' נושאים')),
   ];
+  if (next) {
+    kids.push(el('button', { class: 'btn btn-primary btn-block', style: 'margin-bottom:14px', onclick: startSurvey },
+      !S.done['about'] ? 'מתחילים' : (topicStats().done ? 'להמשיך: ' : 'לנושא הראשון: ') + next.title, icon('arrow-left')));
+  }
 
   // "קצת עליך": מומלץ, לא חוסם
   const aboutDone = !!S.done['about'];
@@ -365,8 +397,8 @@ function goChapter(chId) {
   const ch = S.survey.chapters.find(c => c.id === chId);
   if (!ch) return goCategories();
   const cat = catOf(ch);
-  const chs = ch.cat ? catChapters(ch.cat) : [];
-  const pos = chs.indexOf(ch);
+  const order = orderedChapters();
+  const pos = order.indexOf(ch);
 
   const answers = getDraft(chId);
   const container = el('div', {});
@@ -381,10 +413,10 @@ function goChapter(chId) {
     )
   );
   if (cat && pos >= 0) {
+    const doneCount = order.filter(c => S.done[c.id]).length;
     container.append(el('div', { class: 'chapter-pos' },
-      el('span', {}, cat.title + ' · נושא ' + (pos + 1) + ' מתוך ' + chs.length),
-      el('span', { class: 'steps', 'aria-hidden': 'true' },
-        ...chs.map((c, i) => el('i', { class: i === pos || S.done[c.id] ? 'on' : '' })))
+      el('span', {}, cat.title + ' · נושא ' + (pos + 1) + ' מתוך ' + order.length),
+      el('span', { class: 'pos-bar', 'aria-hidden': 'true' }, el('i', { style: 'width:' + Math.round((doneCount / order.length) * 100) + '%' }))
     ));
   }
   // פתיח וסיום בקול של הוועדה (למשל ועדת התרבות)
@@ -404,9 +436,9 @@ function goChapter(chId) {
 
   container.append(
     el('div', { class: 'chapter-nav' },
-      el('button', { class: 'btn btn-ghost btn-round', 'aria-label': 'חזרה', title: 'חזרה', onclick: () => ch.cat ? goCategory(ch.cat) : goCategories() }, icon('arrow-right')),
+      el('button', { class: 'btn btn-ghost btn-round', 'aria-label': 'לכל הנושאים', title: 'לכל הנושאים', onclick: goCategories }, icon('arrow-right')),
       el('button', { class: 'btn btn-primary', id: 'submitBtn', onclick: () => submitChapter(ch) },
-        ch.id === 'about' ? 'שמירה' : (S.done[chId] ? 'עדכון והמשך' : 'שמירה והמשך'), icon('arrow-left'))
+        ch.id === 'about' ? 'המשך' : (S.done[chId] ? 'עדכון והמשך' : 'שמירה והמשך'), icon('arrow-left'))
     )
   );
 
@@ -742,11 +774,6 @@ async function skipChapter(ch) {
 }
 
 function afterChapterDone(ch, skipped) {
-  if (ch.id === 'about') {
-    showToast('נשמר! 🙏', 'success', 1800);
-    return goCategories();
-  }
-
   const stats = completionStats();
   if (stats.complete) {
     celebrate();
@@ -755,111 +782,18 @@ function afterChapterDone(ch, skipped) {
     return;
   }
 
-  const next = ch.cat ? catChapters(ch.cat).find(c => !S.done[c.id]) : null;
-  if (next) {
-    showToast((skipped ? 'דילגנו. ' : 'נשמר! ') + 'ממשיכים ← ' + next.title, 'success', 2200);
-    goChapter(next.id);
-  } else {
-    const cat = catOf(ch);
-    showToast(cat ? 'סיימתם את ' + cat.title + '! 🎉' : 'נשמר!', 'success', 2600);
-    goCategories();
-  }
+  const next = nextChapter();
+  if (!next) return goCategories();
+  const cat = catOf(ch), nextCat = catOf(next);
+  const msg = ch.id === 'about' ? 'תודה! מתחילים: ' + next.title
+    : cat && nextCat && cat.id !== nextCat.id ? 'סיימתם את ' + cat.title + '! עוברים ל' + nextCat.title
+    : (skipped ? 'דילגנו. ' : 'נשמר! ') + 'ממשיכים: ' + next.title;
+  showToast(msg, 'success', 2400);
+  goChapter(next.id);
 }
-
-// ── "אמשיך אחר כך" + המשך ממכשיר אחר (טלפון + קוד בן 4 ספרות) ──
-// הקוד הוא מה שמגן על התשובות: בלי קוד, כל מי שיודע את המספר של שכן היה יכול לטעון את התשובות שלו.
-// השרת שומר את הטלפון רק כחתימה מוצפנת עם מפתח סודי, ומגביל ניסיונות.
 
 function validPhone(p) {
   return /^0\d{8,9}$/.test(p.replace(/[^0-9]/g, ''));
-}
-
-function validPin(p) {
-  return /^\d{4}$/.test(p.trim());
-}
-
-function phoneInput() {
-  return el('input', { class: 'txt-input', placeholder: '05X-XXXXXXX', type: 'tel', inputmode: 'tel', autocomplete: 'tel', dir: 'ltr', style: 'text-align:center', 'aria-label': 'טלפון' });
-}
-
-function pinInput(placeholder) {
-  return el('input', { class: 'txt-input mt pin-input', placeholder, type: 'text', inputmode: 'numeric', maxlength: '4', autocomplete: 'off', dir: 'ltr', 'aria-label': 'קוד בן 4 ספרות' });
-}
-
-function showLaterModal() {
-  const phoneIn = phoneInput();
-  const pinIn = pinInput('בחרו קוד בן 4 ספרות');
-  const modal = el('div', { class: 'modal' },
-    el('h3', {}, icon('bookmark'), 'ממשיכים מתי שנוח'),
-    el('p', {}, 'ההתקדמות נשמרת אוטומטית במכשיר הזה, אפשר פשוט לסגור ולחזור.'),
-    el('p', {}, el('strong', {}, 'רוצים להמשיך ממכשיר אחר?'), ' השאירו טלפון ובחרו קוד. במכשיר השני תזינו את שניהם.'),
-    phoneIn, pinIn,
-    el('p', { class: 'small muted mt' }, 'המספר לא נשמר כמו שהוא, והצוות לא יכול לראות אותו.'),
-    el('div', { class: 'modal-actions' },
-      el('button', {
-        class: 'btn btn-primary', style: 'flex:1', onclick: async (e) => {
-          const b = e.currentTarget; // הכפתור עצמו, גם כשלוחצים על האייקון שבתוכו
-          const phone = phoneIn.value.trim(), pin = pinIn.value.trim();
-          if (!validPhone(phone)) { showToast('בדקו את מספר הטלפון', 'warning'); return; }
-          if (!validPin(pin)) { showToast('הקוד צריך להיות 4 ספרות', 'warning'); return; }
-          if (!S.serverMode) { showToast('יעבוד אחרי חיבור המערכת לשרת', 'warning'); return; }
-          b.disabled = true;
-          try {
-            const res = await apiPost('linkResume', { phone, pin, rid: getRid() });
-            if (!res.success) throw new ServerSaid(res.message);
-            closeModal();
-            showToast('נשמר! במכשיר השני: "כבר התחלתי במכשיר אחר", הטלפון והקוד', 'success', 5000);
-          } catch (err) {
-            b.disabled = false;
-            showToast(err instanceof ServerSaid && err.message ? err.message : 'לא הצליח, נסו שוב', 'error');
-          }
-        }
-      }, 'שמירה'),
-      el('button', { class: 'btn btn-ghost', onclick: closeModal }, 'סגירה')
-    )
-  );
-  openModal(modal);
-}
-
-function showResumeByPhone() {
-  const phoneIn = phoneInput();
-  const pinIn = pinInput('הקוד שבחרתם');
-  const modal = el('div', { class: 'modal' },
-    el('h3', {}, icon('smartphone'), 'ממשיכים מאיפה שעצרתם'),
-    el('p', {}, 'הזינו את הטלפון והקוד שבחרתם במכשיר הקודם:'),
-    phoneIn, pinIn,
-    el('div', { class: 'modal-actions' },
-      el('button', {
-        class: 'btn btn-primary', style: 'flex:1', onclick: async (e) => {
-          const b = e.currentTarget; // הכפתור עצמו, גם כשלוחצים על האייקון שבתוכו
-          const phone = phoneIn.value.trim(), pin = pinIn.value.trim();
-          if (!validPhone(phone)) { showToast('בדקו את מספר הטלפון', 'warning'); return; }
-          if (!validPin(pin)) { showToast('הקוד צריך להיות 4 ספרות', 'warning'); return; }
-          if (!S.serverMode) { showToast('יעבוד אחרי חיבור המערכת לשרת', 'warning'); return; }
-          b.disabled = true;
-          try {
-            const res = await apiPost('resumeByPhone', { phone, pin });
-            if (!res.success) throw new ServerSaid(res.message);
-            setRid(res.rid);
-            S.done = {};
-            for (const [chId, data] of Object.entries(res.chapters || {})) {
-              S.done[chId] = data.ts || new Date().toISOString();
-              setDraft(chId, data.answers || {});
-            }
-            localStorage.setItem(DONE_KEY, JSON.stringify(S.done));
-            closeModal();
-            showToast('ברוכים השבים! 👋', 'success');
-            goCategories();
-          } catch (err) {
-            b.disabled = false;
-            showToast(err instanceof ServerSaid && err.message ? err.message : 'לא הצליח, בדקו את החיבור ונסו שוב', 'error');
-          }
-        }
-      }, 'המשך'),
-      el('button', { class: 'btn btn-ghost', onclick: closeModal }, 'סגירה')
-    )
-  );
-  openModal(modal);
 }
 
 // ── התחלה מחדש ──────────────────────────────────────────
@@ -913,7 +847,9 @@ function showFaq() {
   const drawer = el('aside', { class: 'drawer', id: 'faqDrawer', role: 'dialog', 'aria-label': 'שאלות ותשובות' },
     el('h3', {}, 'שאלות? תשובות.'),
     ...items,
-    el('button', { class: 'btn btn-ghost btn-block mt', onclick: closeDrawer }, 'סגירה')
+    el('button', { class: 'btn btn-ghost btn-block mt', onclick: closeDrawer }, 'סגירה'),
+    el('p', { class: 'center mt' },
+      el('button', { class: 'link-btn', onclick: () => { closeDrawer(); showRestartModal(); } }, icon('rotate-ccw'), ' להתחיל את הסקר מחדש'))
   );
   const back = el('div', { class: 'drawer-back', id: 'drawerBack', onclick: closeDrawer });
   document.body.append(back, drawer);

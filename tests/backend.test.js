@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const ROOT = process.argv[2] || path.join(__dirname, '..');
+const ROOT = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 
 const { createGas } = require('./mock-gas.js');
 const { ctx, SS, props, cache, triggers, logs } = createGas(ROOT);
@@ -30,7 +30,7 @@ check('setup: keepWarm trigger', triggers.length === 1);
 ctx.setup();
 check('setup twice: still one trigger', triggers.length === 1);
 check('setup: password logged', logs.some(l => String(l).includes(pw())));
-check('setup: pepper created', !!props.PHONE_PEPPER);
+check('setup: no phone secret needed anymore', !props.PHONE_PEPPER);
 
 // ── 2. seed ──
 check('ping', get({ action: 'ping' }).success === true);
@@ -94,24 +94,12 @@ check('system chapter name rejected', !r.success);
 r = post({ action: 'submitChapter', rid: A, chapter: 'community', answers: { brand_new_q: 'x' } });
 check('new question column added on the fly', r.success && flat.rows[0].includes('brand_new_q'), r);
 
-// ── 5. המשך ממכשיר אחר ──
-r = post({ action: 'linkResume', phone: '054-1234567', pin: '1234', rid: A });
-check('linkResume', r.success, r);
-const links = SS.getSheetByName('קודי המשך');
-check('phone not stored in clear', !JSON.stringify(links.rows).includes('1234567') && !JSON.stringify(links.rows).includes('"1234"'));
-r = post({ action: 'resumeByPhone', phone: '0541234567', pin: '1234' });
-check('resume with right pin', r.success && r.rid === A && r.chapters.community.answers.comm_belong === 7, r);
-r = post({ action: 'resumeByPhone', phone: '0541234567' });
-check('resume without pin fails', !r.success);
-for (let i = 0; i < 5; i++) r = post({ action: 'resumeByPhone', phone: '0541234567', pin: '0000' });
-check('wrong pin fails', !r.success);
-r = post({ action: 'resumeByPhone', phone: '0541234567', pin: '1234' });
-check('rate limited after 5 wrong tries (even with right pin)', !r.success && r.message.includes('יותר מדי'), r);
-Object.keys(cache).forEach(k => delete cache[k]);
-r = post({ action: 'resumeByPhone', phone: '0541234567', pin: '1234' });
-check('works again after the hour', r.success, r);
-r = get({ action: 'resume', rid: A });
-check('raw resume action no longer exposed', !r.success && /Unknown action/.test(r.message), r);
+// ── 5. אין המשך ממכשיר אחר (הוסר כשהשאלון התקצר): שום פעולה לא מחזירה תשובות לפי טלפון או קוד עונה ──
+for (const action of ['linkResume', 'resumeByPhone', 'resumeByHash', 'resume']) {
+  r = post({ action, rid: A, phone: '0541234567', pin: '1234' });
+  check(action + ' not exposed', !r.success && /Unknown action/.test(r.message), r);
+}
+check('no resume-links tab', !SS.getSheetByName('קודי המשך'));
 
 // ── 6. הגרלה ──
 r = post({ action: 'enterRaffle', rid: A, name: 'ישראל ישראלי', phone: '0541234567' });

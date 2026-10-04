@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const { createGas } = require('./mock-gas.js');
 
-const ROOT = process.argv[2] || path.join(__dirname, '..');
+const ROOT = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const PORT = Number(process.argv[3] || 5178);
 const g = createGas(ROOT);
 g.ctx.setup();

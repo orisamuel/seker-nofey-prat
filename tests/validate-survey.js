@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 
-const ROOT = process.argv[2] || path.join(__dirname, '..');
+const ROOT = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const ctx = { window: {} };
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(path.join(ROOT, 'survey-data.js'), 'utf8'), ctx);

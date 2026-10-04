@@ -151,28 +151,16 @@ svg.ic { width: 1em; height: 1em; flex: none; display: inline-block; vertical-al
 
 .topbar-btn:hover { border-color: var(--line-strong); }
 
-/* "אמשיך אחר כך" — בולט תמיד, גם במובייל */
-.topbar-btn.save-later { background: var(--ochre-soft); border-color: #E9CB8A; font-weight: 600; }
-
-.topbar-btn.save-later:hover { background: #F5E4BC; }
-
 .progress-rail { height: 6px; background: var(--paper-deep); border-radius: 99px; overflow: hidden; flex: 1; max-width: 110px; }
 
 .progress-fill { height: 100%; width: 0; background: var(--teal); border-radius: 99px; transition: width .6s cubic-bezier(.22, 1, .36, 1); }
 
 .progress-label { font-size: 13px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; font-weight: 500; }
 
-/* במסכים צרים: מד ההתקדמות מפנה מקום, הכפתור החשוב נשאר מלא */
 @media (max-width: 460px) {
-  .topbar-in { gap: 6px; padding-inline: 12px; }
+  .topbar-in { gap: 8px; padding-inline: 12px; }
   .brand { font-size: 27px; }
-  .progress-label { display: none; }
-  .progress-rail { max-width: 40px; }
-  .topbar-btn.save-later { padding: 0 11px; font-size: 13px; }
-}
-
-@media (max-width: 360px) {
-  .progress-rail { display: none; }
+  .progress-rail { max-width: 90px; }
 }
 
 /* באנר תצוגה מקדימה: האתר לא מחובר לשרת */
@@ -479,11 +467,9 @@ svg.ic { width: 1em; height: 1em; flex: none; display: inline-block; vertical-al
 
 .chapter-pos { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); margin: 6px 2px 14px; }
 
-.chapter-pos .steps { display: flex; gap: 4px; margin-inline-start: auto; }
+.chapter-pos .pos-bar { flex: 1; max-width: 120px; height: 6px; border-radius: 99px; background: var(--line); overflow: hidden; margin-inline-start: auto; }
 
-.chapter-pos .steps i { width: 18px; height: 6px; border-radius: 4px; background: var(--line); }
-
-.chapter-pos .steps i.on { background: var(--hue, var(--teal)); }
+.chapter-pos .pos-bar i { display: block; height: 100%; background: var(--hue, var(--teal)); border-radius: 99px; }
 
 .ch-intro, .ch-outro {
   background: var(--hue-soft, var(--teal-soft));
@@ -608,10 +594,6 @@ textarea.txt-input { min-height: 104px; resize: vertical; }
 .txt-input::placeholder { color: #9A9F97; }
 
 .num-input { max-width: 130px; text-align: center; font-weight: 600; }
-
-.pin-input { text-align: center; font-variant-numeric: tabular-nums; }
-
-.pin-input:not(:placeholder-shown) { letter-spacing: .4em; }
 
 /* דירוג בגרירה (נתמך, לא בשימוש בשאלון הנוכחי) */
 .rank-list { display: grid; gap: 8px; counter-reset: rank; }
