@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>דשבורד צוות — סקר נופי פרת</title>
+  <title>דשבורד צוות · סקר נופי פרת</title>
   <meta name="robots" content="noindex">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -54,7 +54,7 @@ async function load(password) {
   app.replaceChildren(el('div', { class: 'center', style: 'padding:80px 0' }, el('div', { class: 'spinner' }), el('p', { class: 'muted' }, 'טוען נתונים…')));
   try {
     if (isLocalMode()) throw new Error('SCRIPT_URL עדיין לא הוגדר ב-config.js');
-    const res = await apiCall('getResults', { password });
+    const res = await apiPost('getResults', { password }); // POST: הסיסמה לא נכנסת לכתובת
     if (!res.success) { sessionStorage.removeItem('np_dash_pw'); return renderLogin(res.message); }
     sessionStorage.setItem('np_dash_pw', password);
     D.rows = res.rows; D.survey = res.survey; D.raffleCount = res.raffleCount || 0;
@@ -96,7 +96,7 @@ function render() {
     el('div', { class: 'stat-row', style: 'margin-top:20px' },
       statTile(rids.length, 'עונים'),
       statTile(D.rows.length, 'פרקים שהוגשו'),
-      statTile(rids.length ? (D.rows.length / rids.length).toFixed(1) : '—', 'פרקים לעונה בממוצע'),
+      statTile(rids.length ? (D.rows.length / rids.length).toFixed(1) : '0', 'פרקים לעונה בממוצע'),
       statTile(D.raffleCount, 'נרשמו להגרלה 🎁'),
     ),
     tabs,
@@ -132,23 +132,26 @@ function renderOverview() {
   });
   wrap.append(card);
 
-  // ציוני הסולמות הנמוכים/גבוהים ביותר — מבט מהיר על חוזקות וכאבים
+  // ציוני הסולמות הנמוכים/גבוהים ביותר — מבט מהיר על חוזקות וכאבים.
+  // מדרגים לפי ציון מנורמל (0–1), כדי שסולם 1–7 לא ייראה "נמוך" ליד סולמות 1–10.
   const scales = [];
   D.survey.chapters.forEach(ch => ch.questions.forEach(q => {
     if (q.type !== 'scale') return;
     const vals = answersOf(q.id).map(Number).filter(n => !isNaN(n));
-    if (vals.length >= 3) scales.push({ ch, q, n: vals.length, avg: vals.reduce((a, b) => a + b, 0) / vals.length });
+    if (vals.length < 3) return;
+    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+    scales.push({ ch, q, n: vals.length, avg, norm: normScore(avg, q) });
   }));
-  scales.sort((a, b) => a.avg - b.avg);
+  scales.sort((a, b) => a.norm - b.norm);
   if (scales.length) {
     const lows = scales.slice(0, 8), highs = scales.slice(-8).reverse();
     wrap.append(
       el('div', { class: 'card' },
-        el('h3', { class: 'mb' }, '🔻 הציונים הנמוכים ביותר — כאן כואב'),
+        el('h3', { class: 'mb' }, '🔻 הציונים הנמוכים ביותר: כאן כואב'),
         ...lows.map(s => scaleRow(s))
       ),
       el('div', { class: 'card' },
-        el('h3', { class: 'mb' }, '🔺 הציונים הגבוהים ביותר — מה עובד'),
+        el('h3', { class: 'mb' }, '🔺 הציונים הגבוהים ביותר: מה עובד'),
         ...highs.map(s => scaleRow(s))
       )
     );
@@ -162,13 +165,22 @@ function scaleRow(s) {
       el('div', { class: 'bar-name' }, s.q.text),
       el('div', { class: 'small muted' }, (s.ch.icon || '') + ' ' + s.ch.title + ' · ' + s.n + ' תשובות')
     ),
-    avgChip(s.avg)
+    avgChip(s.avg, s.q)
   );
 }
 
-function avgChip(avg) {
-  const cls = avg >= 7 ? 'avg-good' : avg >= 5 ? 'avg-mid' : 'avg-low';
-  return el('span', { class: 'avg-chip ' + cls }, avg.toFixed(1));
+// ציון כחלק מהטווח: 0 = הקצה התחתון, 1 = העליון
+function normScore(avg, q) {
+  const lo = q.min || 1, hi = q.max || 10;
+  return hi > lo ? (avg - lo) / (hi - lo) : 0;
+}
+
+// צבע לפי הציון המנורמל (בסולם 1–10: 7 ומעלה ירוק, 5 ומעלה צהוב). בסולם שאינו 1–10 מוצג גם הטווח.
+function avgChip(avg, q) {
+  const n = normScore(avg, q || {});
+  const cls = n >= 6 / 9 ? 'avg-good' : n >= 4 / 9 ? 'avg-mid' : 'avg-low';
+  const hi = (q && q.max) || 10;
+  return el('span', { class: 'avg-chip ' + cls }, avg.toFixed(1) + (hi !== 10 ? '/' + hi : ''));
 }
 
 function chapterRespondents(chId) {
@@ -188,12 +200,12 @@ function renderChapter(ch) {
       el('p', { class: 'q-text' }, q.text),
       el('p', { class: 'small muted mb' }, vals.length + ' תשובות')
     );
-    if (!vals.length) { card.append(el('p', { class: 'muted small' }, '— אין תשובות עדיין —')); wrap.append(card); return; }
+    if (!vals.length) { card.append(el('p', { class: 'muted small' }, 'אין תשובות עדיין')); wrap.append(card); return; }
 
     if (q.type === 'scale' || q.type === 'number') {
       const nums = vals.map(Number).filter(n => !isNaN(n));
       const avg = nums.reduce((a, b) => a + b, 0) / nums.length;
-      card.append(el('div', { class: 'mb' }, avgChip(avg), el('span', { class: 'small muted' }, '  ממוצע')));
+      card.append(el('div', { class: 'mb' }, q.type === 'scale' ? avgChip(avg, q) : el('span', { class: 'avg-chip avg-mid' }, avg.toFixed(1)), el('span', { class: 'small muted' }, '  ממוצע')));
       if (q.type === 'scale') {
         const hist = {};
         nums.forEach(n => hist[n] = (hist[n] || 0) + 1);

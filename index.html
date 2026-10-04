@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>סקר התושבים — נופי פרת</title>
-  <meta name="description" content="סקר התושבים השנתי של נופי פרת — הדעה שלך קובעת">
+  <title>סקר התושבים · נופי פרת</title>
+  <meta name="description" content="סקר התושבים השנתי של נופי פרת. הדעה שלך קובעת איך היישוב ייראה בשנה הקרובה">
   <meta name="theme-color" content="#F6EEDF">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌿</text></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -33,11 +33,16 @@
     <div class="spacer"></div>
     <div class="progress-rail" aria-hidden="true"><div class="progress-fill" id="progressFill"></div></div>
     <span class="progress-label" id="progressLabel"></span>
-    <button class="topbar-btn save-later" onclick="showLaterModal()" title="שמירה והמשך אחר־כך">🔖 אמשיך אחר־כך</button>
+    <button class="topbar-btn save-later" onclick="showLaterModal()" title="שמירה והמשך אחר כך">🔖 אמשיך אחר כך</button>
     <button class="topbar-btn" onclick="showRestartModal()" aria-label="התחלה מחדש" title="התחלה מחדש">↺</button>
     <button class="topbar-btn" onclick="showFaq()" aria-label="שאלות ותשובות">❓</button>
   </div>
 </header>
+
+<!-- מוצג רק כשהאתר לא מחובר לשרת: התשובות לא מגיעות לצוות -->
+<div class="preview-banner" id="previewBanner" hidden>
+  תצוגה מקדימה: התשובות נשמרות רק במכשיר הזה ולא נשלחות לצוות
+</div>
 
 <main class="wrap" id="app" aria-live="polite"></main>
 
@@ -52,30 +57,59 @@ const S = {
   done: {},                // chapterId → ISO timestamp
   serverMode: false,
   raffleEntered: false,
+  view: '',                // המסך הנוכחי: landing | categories | category | chapter | closed
 };
 
 const DONE_KEY = 'np_done';
 const RAFFLE_KEY = 'np_raffle_entered';
+const VER_KEY = 'np_ver';
 const draftKey = (ch) => 'np_draft_' + ch;
 
 init();
 
 async function init() {
+  resetIfNewVersion();
   S.done = JSON.parse(localStorage.getItem(DONE_KEY) || '{}');
   S.raffleEntered = localStorage.getItem(RAFFLE_KEY) === 'yes';
   S.serverMode = !isLocalMode();
+  document.getElementById('previewBanner').hidden = S.serverMode;
 
-  if (S.serverMode) {
-    warmupServer();
-    try {
-      const res = await apiCall('getSurvey');
-      if (res.success && res.survey && res.survey.chapters) S.survey = res.survey;
-    } catch (e) { /* fallback מקומי */ }
-  }
-  if (!S.survey) S.survey = window.SURVEY_DATA;
-
+  // מציגים מיד מהקובץ המוטמע, בלי לחכות לשרת (התעוררות של Apps Script לוקחת כמה שניות)
+  S.survey = window.SURVEY_DATA;
   document.getElementById('loadingScreen').classList.add('hidden');
   goHome();
+
+  if (!S.serverMode) return;
+  try {
+    const res = await apiCall('getSurvey');
+    if (res.open === false) return goClosed();
+    if (res.success && res.survey && res.survey.chapters && res.survey.chapters.length) {
+      S.survey = res.survey;
+      // הגרסה מהגיליון (שהצוות אולי ערך) נכנסת לתוקף; באמצע פרק לא מרעננים כדי לא לקטוע הקלדה
+      if (S.view === 'landing' || S.view === 'categories') goHome();
+      else updateProgress();
+    }
+  } catch (e) { /* נשארים עם הקובץ המוטמע */ }
+}
+
+// שאלון חדש = התחלה נקייה. טיוטות מגרסה קודמת (למשל של מי שבדק את הסקר מראש) נמחקות.
+function resetIfNewVersion() {
+  const ver = String((window.SURVEY_DATA.meta || {}).version || '1');
+  if (localStorage.getItem(VER_KEY) === ver) return;
+  Object.keys(localStorage).filter(k => k.startsWith('np_')).forEach(k => localStorage.removeItem(k));
+  localStorage.setItem(VER_KEY, ver);
+}
+
+function goClosed() {
+  closeModal();
+  const m = S.survey.meta;
+  const view = el('div', { class: 'land' },
+    sceneSvg(),
+    el('h1', {}, m.title, el('span', { class: 'yishuv-name' }, m.yishuv)),
+    el('p', { class: 'tagline' }, 'הסקר סגור כרגע למענה'),
+    el('p', { class: 'subline' }, 'תודה לכל מי שענה! תקציר התוצאות יפורסם לכל התושבים.')
+  );
+  setView(view, null, 'closed');
 }
 
 // ── עזרי מצב ─────────────────────────────────────────────
@@ -135,11 +169,12 @@ function updateProgress() {
   document.getElementById('progressLabel').textContent = hasStarted() ? done + '/' + total : '';
 }
 
-function setView(node, hue) {
+function setView(node, hue, viewName) {
   const app = document.getElementById('app');
   app.className = 'wrap' + (hue ? ' hue-' + hue : '');
   app.replaceChildren(node);
   node.classList.add('fade-in');
+  S.view = viewName || '';
   window.scrollTo({ top: 0, behavior: 'instant' });
   updateProgress();
 }
@@ -163,7 +198,7 @@ function goLanding() {
       el('button', { class: 'btn btn-ghost btn-sm', onclick: showResumeByPhone }, 'כבר התחלתי במכשיר אחר')
     )
   );
-  setView(view);
+  setView(view, null, 'landing');
 }
 
 // נוף ואדי פרת — סצנת הפתיחה
@@ -230,17 +265,18 @@ function goCategories() {
   } else if (stats.complete && S.raffleEntered) {
     kids.push(el('div', { class: 'raffle-strip' },
       el('span', { class: 'emoji' }, '🎉'),
-      el('span', { class: 'txt' }, el('strong', {}, 'סיימתם ונרשמתם להגרלה'), ' — בהצלחה!')
+      el('span', { class: 'txt' }, el('strong', {}, 'סיימתם ונרשמתם להגרלה'), ', בהצלחה!')
     ));
   } else {
-    const onlyAboutLeft = stats.total - stats.done === 1 && !S.done['about'];
+    const left = stats.total - stats.done;
+    const onlyAboutLeft = left === 1 && !S.done['about'];
     kids.push(el('div', { class: 'raffle-strip' },
       el('span', { class: 'emoji' }, '🎁'),
       el('span', { class: 'txt' },
         onlyAboutLeft
-          ? el('span', {}, 'נשאר רק למלא ', el('strong', {}, '"קצת עליך"'), ' — וההגרלה נפתחת!')
+          ? el('span', {}, 'נשאר רק למלא ', el('strong', {}, '"קצת עליך"'), ' וההגרלה נפתחת!')
           : stats.done > 0
-            ? el('span', {}, el('strong', {}, (stats.total - stats.done) + ' פרקים'), ' בינך לבין הגרלת ' + m.raffle.prize)
+            ? el('span', {}, el('strong', {}, left === 1 ? 'נושא אחד' : left + ' נושאים'), ' בינך לבין הגרלת ' + m.raffle.prize)
             : el('span', {}, 'משלימים את הסקר ← נכנסים להגרלת ', el('strong', {}, m.raffle.prize))
       )
     ));
@@ -252,7 +288,7 @@ function goCategories() {
     el('span', { class: 'p-icon' }, '👋'),
     el('span', { class: 'p-body' },
       el('span', { class: 'p-title' }, 'קצת עליך'),
-      el('span', { class: 'p-sub' }, aboutDone ? 'מולא — אפשר לעדכן בכל רגע' : 'מומלץ למלא קודם — כדי לקבל רק את השאלות שרלוונטיות אליכם')
+      el('span', { class: 'p-sub' }, aboutDone ? 'מולא, אפשר לעדכן בכל רגע' : 'מומלץ למלא קודם, כדי לקבל רק את השאלות שרלוונטיות אליכם')
     ),
     el('span', { class: 'p-status' }, aboutDone ? '✓' : 'למילוי')
   ));
@@ -275,7 +311,7 @@ function goCategories() {
   });
   kids.push(grid);
 
-  setView(el('div', {}, ...kids));
+  setView(el('div', {}, ...kids), null, 'categories');
 }
 
 // ── מסך קטגוריה ──────────────────────────────────────────
@@ -317,7 +353,7 @@ function goCategory(catId) {
       el('button', { class: 'btn btn-ghost btn-sm', onclick: goCategories }, 'לכל התחומים')
     )
   );
-  setView(view, cat.hue);
+  setView(view, cat.hue, 'category');
 }
 
 function visibleQuestionCount(ch) {
@@ -349,14 +385,18 @@ function goChapter(chId) {
   if (cat && pos >= 0) {
     container.append(el('p', { class: 'chapter-pos' }, cat.icon + ' ' + cat.title + ' · נושא ' + (pos + 1) + ' מתוך ' + chs.length));
   }
+  // פתיח וסיום בקול של הוועדה (למשל ועדת התרבות)
+  if (ch.intro) container.append(el('p', { class: 'ch-intro' }, ch.intro));
 
   const qWrap = el('div', {});
   ch.questions.forEach(q => qWrap.append(renderQuestion(ch, q, answers)));
   container.append(qWrap);
 
+  if (ch.outro) container.append(el('p', { class: 'ch-outro' }, ch.outro));
+
   if (ch.id !== 'about') {
     container.append(el('p', { class: 'center' },
-      el('button', { class: 'skip-link', onclick: () => skipChapter(ch) }, 'הנושא לא רלוונטי אליי — לנושא הבא ←')
+      el('button', { class: 'skip-link', onclick: () => skipChapter(ch) }, 'הנושא לא רלוונטי אליי, לנושא הבא ←')
     ));
   }
 
@@ -368,7 +408,7 @@ function goChapter(chId) {
     )
   );
 
-  setView(container, cat ? cat.hue : 'green');
+  setView(container, cat ? cat.hue : 'green', 'chapter');
   refreshVisibility(ch);
 }
 
@@ -411,8 +451,11 @@ function renderQuestion(ch, q, answers) {
 
 function renderScale(ch, q, answers) {
   const wrap = el('div', {});
+  const lo = q.min || 1, hi = q.max || 10;
   const grid = el('div', { class: 'scale-grid', role: 'radiogroup', 'aria-label': q.text });
-  for (let v = q.min || 1; v <= (q.max || 10); v++) {
+  // סולם קצר (למשל 1–7) נכנס בשורה אחת גם במובייל; 1–10 נשבר ל-5+5
+  if (hi - lo + 1 <= 7) grid.style.gridTemplateColumns = 'repeat(' + (hi - lo + 1) + ', 1fr)';
+  for (let v = lo; v <= hi; v++) {
     const chip = el('button', {
       class: 'scale-chip' + (answers[q.id] === v ? ' sel' : ''),
       type: 'button', role: 'radio', 'aria-checked': answers[q.id] === v ? 'true' : 'false',
@@ -453,6 +496,9 @@ function renderChoice(ch, q, answers, multi) {
   };
 
   let otherBox = null;
+  // בחירה מרובה עם תקרה (למשל "בחר 3"): בהגעה לתקרה שאר האפשרויות מתעמעמות
+  const maxSel = multi && q.max ? Number(q.max) : 0;
+  const atMax = () => maxSel > 0 && current().length >= maxSel;
 
   const rebuild = () => {
     wrap.querySelectorAll('.opt').forEach(o => {
@@ -460,6 +506,7 @@ function renderChoice(ch, q, answers, multi) {
       o.classList.toggle('sel', isSel(opt));
       o.setAttribute('aria-checked', isSel(opt) ? 'true' : 'false');
     });
+    wrap.classList.toggle('maxed', atMax());
     if (otherBox) otherBox.style.display = isSel('אחר') ? '' : 'none';
   };
 
@@ -471,6 +518,11 @@ function renderChoice(ch, q, answers, multi) {
       onclick: () => {
         if (multi) {
           let cur = current().slice();
+          const adding = !isSel(opt) && !(q.exclusive && opt === q.exclusive);
+          if (adding && atMax()) {
+            showToast('אפשר לבחור עד ' + maxSel + '. כדי להחליף, בטלו קודם בחירה אחרת', 'warning');
+            return;
+          }
           if (opt === 'אחר') {
             if (isSel('אחר')) cur = cur.filter(v => !v.startsWith(OTHER_PREFIX));
             else cur.push(OTHER_PREFIX);
@@ -521,6 +573,7 @@ function renderChoice(ch, q, answers, multi) {
     wrap.append(otherBox);
   }
 
+  wrap.classList.toggle('maxed', atMax());
   return wrap;
 }
 
@@ -638,26 +691,27 @@ async function submitChapter(ch) {
   if (!Object.keys(visAns).length) {
     openModal(el('div', { class: 'modal' },
       el('h3', {}, 'עוד לא עניתם כאן'),
-      el('p', {}, 'אפשר לענות אפילו על שאלה אחת — או לסמן שהנושא לא רלוונטי ולהמשיך הלאה.'),
+      el('p', {}, 'אפשר לענות אפילו על שאלה אחת, או לסמן שהנושא לא רלוונטי ולהמשיך הלאה.'),
       el('div', { class: 'mt', style: 'display:grid; gap:8px' },
         el('button', { class: 'btn btn-primary', onclick: closeModal }, 'למענה'),
-        el('button', { class: 'btn btn-ghost', onclick: () => { closeModal(); skipChapter(ch); } }, 'הנושא לא רלוונטי אליי — לנושא הבא ←')
+        el('button', { class: 'btn btn-ghost', onclick: () => { closeModal(); skipChapter(ch); } }, 'הנושא לא רלוונטי אליי, לנושא הבא ←')
       )
     ));
     return;
   }
 
+  const btnLabel = btn.textContent;
   btn.disabled = true;
   btn.textContent = 'שומר…';
 
   if (S.serverMode) {
     try {
       const res = await apiPost('submitChapter', { rid: getRid(), chapter: ch.id, answers: visAns });
-      if (!res.success) throw new Error(res.message || 'שגיאה בשמירה');
+      if (!res.success) throw new ServerSaid(res.message);
     } catch (e) {
       btn.disabled = false;
-      btn.textContent = 'שמירה ← והלאה';
-      showToast('השמירה נכשלה — בדקו חיבור ונסו שוב', 'error', 5000);
+      btn.textContent = btnLabel;
+      showToast(e instanceof ServerSaid && e.message ? e.message : 'השמירה נכשלה. בדקו את החיבור ונסו שוב', 'error', 5000);
       return;
     }
   }
@@ -673,9 +727,9 @@ async function skipChapter(ch) {
   if (S.serverMode) {
     try {
       const res = await apiPost('submitChapter', { rid: getRid(), chapter: ch.id, answers: { _skipped: 'כן' } });
-      if (!res.success) throw new Error(res.message || '');
+      if (!res.success) throw new ServerSaid(res.message);
     } catch (e) {
-      showToast('לא הצליח — בדקו חיבור ונסו שוב', 'error');
+      showToast(e instanceof ServerSaid && e.message ? e.message : 'לא הצליח. בדקו את החיבור ונסו שוב', 'error');
       return;
     }
   }
@@ -710,50 +764,54 @@ function afterChapterDone(ch, skipped) {
   }
 }
 
-// ── "אמשיך אחר־כך" + המשך לפי טלפון ─────────────────────
-
-async function hashPhone(phone) {
-  const digits = phone.replace(/[^0-9]/g, '');
-  const data = new TextEncoder().encode('np-salt-' + digits);
-  if (crypto.subtle) {
-    const buf = await crypto.subtle.digest('SHA-256', data);
-    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-  // fallback: FNV-1a
-  let h = 0x811c9dc5;
-  for (const b of data) { h ^= b; h = Math.imul(h, 0x01000193) >>> 0; }
-  return 'f' + h.toString(16);
-}
+// ── "אמשיך אחר כך" + המשך ממכשיר אחר (טלפון + קוד בן 4 ספרות) ──
+// הקוד הוא מה שמגן על התשובות: בלי קוד, כל מי שיודע את המספר של שכן היה יכול לטעון את התשובות שלו.
+// השרת שומר את הטלפון רק כחתימה מוצפנת עם מפתח סודי, ומגביל ניסיונות.
 
 function validPhone(p) {
   return /^0\d{8,9}$/.test(p.replace(/[^0-9]/g, ''));
 }
 
+function validPin(p) {
+  return /^\d{4}$/.test(p.trim());
+}
+
+function phoneInput() {
+  return el('input', { class: 'txt-input', placeholder: '05X-XXXXXXX', type: 'tel', inputmode: 'tel', autocomplete: 'tel', dir: 'ltr', style: 'text-align:center', 'aria-label': 'טלפון' });
+}
+
+function pinInput(placeholder) {
+  return el('input', { class: 'txt-input mt pin-input', placeholder, type: 'text', inputmode: 'numeric', maxlength: '4', autocomplete: 'off', dir: 'ltr', 'aria-label': 'קוד בן 4 ספרות' });
+}
+
 function showLaterModal() {
-  const phoneIn = el('input', { class: 'txt-input', placeholder: '05X-XXXXXXX', type: 'tel', inputmode: 'tel', dir: 'ltr', style: 'text-align:center', 'aria-label': 'טלפון' });
+  const phoneIn = phoneInput();
+  const pinIn = pinInput('בחרו קוד בן 4 ספרות');
   const modal = el('div', { class: 'modal' },
     el('h3', {}, '🔖 ממשיכים מתי שנוח'),
-    el('p', {}, 'ההתקדמות נשמרת אוטומטית במכשיר הזה — אפשר פשוט לסגור ולחזור.'),
-    el('p', {}, el('strong', {}, 'רוצים להמשיך ממכשיר אחר?'), ' השאירו טלפון ותוכלו להזדהות איתו שם. המספר לא מקושר לתשובות.'),
-    phoneIn,
+    el('p', {}, 'ההתקדמות נשמרת אוטומטית במכשיר הזה, אפשר פשוט לסגור ולחזור.'),
+    el('p', {}, el('strong', {}, 'רוצים להמשיך ממכשיר אחר?'), ' השאירו טלפון ובחרו קוד. במכשיר השני תזינו את שניהם.'),
+    phoneIn, pinIn,
+    el('p', { class: 'small muted mt' }, 'המספר לא נשמר כמו שהוא, והצוות לא יכול לראות אותו.'),
     el('div', { class: 'mt', style: 'display:flex; gap:8px' },
       el('button', {
         class: 'btn btn-primary', style: 'flex:1', onclick: async (e) => {
-          const phone = phoneIn.value.trim();
+          const phone = phoneIn.value.trim(), pin = pinIn.value.trim();
           if (!validPhone(phone)) { showToast('בדקו את מספר הטלפון', 'warning'); return; }
+          if (!validPin(pin)) { showToast('הקוד צריך להיות 4 ספרות', 'warning'); return; }
           if (!S.serverMode) { showToast('יעבוד אחרי חיבור המערכת לשרת', 'warning'); return; }
           e.target.disabled = true;
           try {
-            const res = await apiCall('linkResume', { hash: await hashPhone(phone), rid: getRid() });
-            if (!res.success) throw new Error(res.message);
+            const res = await apiPost('linkResume', { phone, pin, rid: getRid() });
+            if (!res.success) throw new ServerSaid(res.message);
             closeModal();
-            showToast('מעולה! מכל מכשיר: "כבר התחלתי" + המספר שלכם', 'success', 4500);
+            showToast('נשמר! במכשיר השני: "כבר התחלתי במכשיר אחר", הטלפון והקוד', 'success', 5000);
           } catch (err) {
             e.target.disabled = false;
-            showToast(err.message || 'לא הצליח — נסו שוב', 'error');
+            showToast(err instanceof ServerSaid && err.message ? err.message : 'לא הצליח, נסו שוב', 'error');
           }
         }
-      }, 'שמירת טלפון'),
+      }, 'שמירה'),
       el('button', { class: 'btn btn-ghost', onclick: closeModal }, 'סגירה')
     )
   );
@@ -761,21 +819,23 @@ function showLaterModal() {
 }
 
 function showResumeByPhone() {
-  const phoneIn = el('input', { class: 'txt-input', placeholder: '05X-XXXXXXX', type: 'tel', inputmode: 'tel', dir: 'ltr', style: 'text-align:center', 'aria-label': 'טלפון' });
+  const phoneIn = phoneInput();
+  const pinIn = pinInput('הקוד שבחרתם');
   const modal = el('div', { class: 'modal' },
     el('h3', {}, 'ממשיכים מאיפה שעצרתם'),
-    el('p', {}, 'הזינו את הטלפון שהשארתם במכשיר הקודם:'),
-    phoneIn,
+    el('p', {}, 'הזינו את הטלפון והקוד שבחרתם במכשיר הקודם:'),
+    phoneIn, pinIn,
     el('div', { class: 'mt', style: 'display:flex; gap:8px' },
       el('button', {
         class: 'btn btn-primary', style: 'flex:1', onclick: async (e) => {
-          const phone = phoneIn.value.trim();
+          const phone = phoneIn.value.trim(), pin = pinIn.value.trim();
           if (!validPhone(phone)) { showToast('בדקו את מספר הטלפון', 'warning'); return; }
+          if (!validPin(pin)) { showToast('הקוד צריך להיות 4 ספרות', 'warning'); return; }
           if (!S.serverMode) { showToast('יעבוד אחרי חיבור המערכת לשרת', 'warning'); return; }
           e.target.disabled = true;
           try {
-            const res = await apiCall('resumeByHash', { hash: await hashPhone(phone) });
-            if (!res.success) throw new Error(res.message);
+            const res = await apiPost('resumeByPhone', { phone, pin });
+            if (!res.success) throw new ServerSaid(res.message);
             setRid(res.rid);
             S.done = {};
             for (const [chId, data] of Object.entries(res.chapters || {})) {
@@ -788,7 +848,7 @@ function showResumeByPhone() {
             goCategories();
           } catch (err) {
             e.target.disabled = false;
-            showToast(err.message || 'לא מצאנו — בדקו את המספר', 'error');
+            showToast(err instanceof ServerSaid && err.message ? err.message : 'לא הצליח, בדקו את החיבור ונסו שוב', 'error');
           }
         }
       }, 'המשך'),
@@ -812,13 +872,25 @@ function showRestartModal() {
   openModal(modal);
 }
 
-function restartAll() {
+async function restartAll(e) {
+  // בשרת: מסמנים את התשובות הקודמות כמבוטלות, אחרת העונה נספר פעמיים בתוצאות
+  if (S.serverMode && Object.keys(S.done).length) {
+    if (e && e.target) e.target.disabled = true;
+    try {
+      const res = await apiPost('discard', { rid: getRid() });
+      if (!res.success) throw new ServerSaid(res.message);
+    } catch (err) {
+      if (e && e.target) e.target.disabled = false;
+      showToast(err instanceof ServerSaid && err.message ? err.message : 'לא הצליח, בדקו את החיבור ונסו שוב', 'error');
+      return;
+    }
+  }
   Object.keys(localStorage)
-    .filter(k => k.startsWith('np_'))
+    .filter(k => k.startsWith('np_') && k !== VER_KEY)
     .forEach(k => localStorage.removeItem(k));
   S.done = {};
   S.raffleEntered = false;
-  setRid(makeRid()); // זהות אנונימית חדשה — התשובות הישנות מנותקות
+  setRid(makeRid()); // זהות אנונימית חדשה
   closeModal();
   showToast('התחלנו דף חדש 🌱', 'success');
   goLanding();
@@ -855,7 +927,7 @@ function showRaffleModal() {
 
   const modal = el('div', { class: 'modal' },
     el('div', { class: 'center', style: 'font-size:2.6rem' }, '🎁'),
-    el('h3', { class: 'center' }, 'סיימתם הכול — הגרלה!'),
+    el('h3', { class: 'center' }, 'סיימתם הכול, נכנסים להגרלה!'),
     el('p', { class: 'center' }, m.prize + ' יכול להיות שלכם.'),
     el('p', { class: 'small muted center' }, m.note),
     nameIn, phoneIn,
@@ -865,22 +937,22 @@ function showRaffleModal() {
           const name = nameIn.value.trim(), phone = phoneIn.value.trim();
           if (name.length < 2) { showToast('נשמח לשם מלא', 'warning'); return; }
           if (!validPhone(phone)) { showToast('בדקו את מספר הטלפון', 'warning'); return; }
+          if (!S.serverMode) { showToast('בתצוגה המקדימה אין הרשמה. היא תיפתח כשהסקר יעלה לאוויר', 'warning', 4500); return; }
           e.target.disabled = true;
           e.target.textContent = 'נרשם…';
           try {
-            if (S.serverMode) {
-              const res = await apiCall('enterRaffle', { rid: getRid(), name, phone });
-              if (!res.success) throw new Error(res.message);
-            }
+            // POST: שם וטלפון לא נכנסים לכתובת (שנשמרת בלוגים)
+            const res = await apiPost('enterRaffle', { rid: getRid(), name, phone });
+            if (!res.success) throw new ServerSaid(res.message);
             S.raffleEntered = true;
             localStorage.setItem(RAFFLE_KEY, 'yes');
             closeModal();
-            showToast('נרשמתם — בהצלחה! 🎉', 'success', 5000);
+            showToast('נרשמתם, בהצלחה! 🎉', 'success', 5000);
             goCategories();
           } catch (err) {
             e.target.disabled = false;
             e.target.textContent = 'הרשמה 🎁';
-            showToast(err.message || 'ההרשמה נכשלה — נסו שוב', 'error');
+            showToast(err instanceof ServerSaid && err.message ? err.message : 'ההרשמה נכשלה, נסו שוב', 'error');
           }
         }
       }, 'הרשמה 🎁'),

@@ -488,6 +488,38 @@ input, textarea, select { font-family: inherit; font-size: inherit; color: inher
 
 .chapter-pos { font-size: .78rem; color: var(--muted); margin: 0 2px 12px; }
 
+/* פתיח וסיום של פרק, בקול של הוועדה */
+.ch-intro, .ch-outro {
+  background: var(--hue-soft, var(--green-soft));
+  border-radius: var(--r-lg);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  font-size: .95rem;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  white-space: pre-line;
+}
+
+.ch-outro { text-align: center; margin-top: 4px; }
+
+/* באנר תצוגה מקדימה: האתר לא מחובר לשרת */
+.preview-banner {
+  background: var(--gold-soft);
+  color: #6B5320;
+  border-bottom: 1.5px solid var(--gold);
+  font-size: .82rem;
+  font-weight: 600;
+  text-align: center;
+  padding: 7px 16px;
+  line-height: 1.4;
+}
+
+.preview-banner[hidden] { display: none; }
+
+.pin-input { text-align: center; font-variant-numeric: tabular-nums; }
+
+.pin-input:not(:placeholder-shown) { letter-spacing: .4em; }
+
 .q-card {
   background: var(--surface);
   border: none;
@@ -548,6 +580,9 @@ input, textarea, select { font-family: inherit; font-size: inherit; color: inher
 }
 
 .opt:hover { box-shadow: inset 0 0 0 2px var(--hue, var(--green)); background: var(--surface); }
+
+/* "בחר עד 3": כשמגיעים לתקרה, האפשרויות שלא נבחרו מתעמעמות */
+.opt-list.maxed .opt:not(.sel) { opacity: .45; }
 
 .opt .mark {
   flex: none; width: 22px; height: 22px;

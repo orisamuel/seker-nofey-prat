@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>התקנה — סקר נופי פרת</title>
+  <title>התקנה · סקר נופי פרת</title>
   <meta name="robots" content="noindex">
   <link rel="stylesheet" href="styles.css">
   <script src="config.js"></script>
@@ -15,10 +15,11 @@
   <div class="card" style="max-width:480px; margin:50px auto">
     <h2 class="mb">⚙️ סנכרון השאלות לגיליון</h2>
     <p class="small muted mb">
-      פעולה חד-פעמית (או בכל פעם שרוצים לטעון מחדש את השאלות מקובץ survey-data.js).
-      <strong>שימו לב:</strong> הסנכרון דורס את טאבי "פרקים" ו"שאלות" בגיליון — עריכות ידניות שם יימחקו. התשובות לא נפגעות.
+      טוען את השאלות מהקובץ survey-data.js אל הגיליון (טאבי "פרקים" ו"שאלות").
+      בפעם הראשונה אין צורך בסיסמה. בכל פעם אחרי זה צריך את סיסמת הצוות מטאב "הגדרות" בגיליון.
+      <strong>שימו לב:</strong> הסנכרון דורס את טאבי "פרקים" ו"שאלות", כולל עריכות שנעשו שם ידנית. התשובות לא נפגעות.
     </p>
-    <input class="txt-input" type="password" id="pw" placeholder="סיסמת הצוות (dashboardPassword)">
+    <input class="txt-input" type="password" id="pw" placeholder="סיסמת הצוות (ריק בפעם הראשונה)">
     <button class="btn btn-primary btn-block mt" id="go" onclick="seed()">סנכרון שאלות לגיליון</button>
     <p class="small muted mt" id="status"></p>
   </div>
