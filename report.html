@@ -3,14 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>תוצאות הסקר — נופי פרת</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌿</text></svg>">
+  <title>תוצאות הסקר · נופי פרת</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3CclipPath id='c'%3E%3Ccircle cx='14' cy='14' r='14'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='28' height='28' fill='%230E6B5B'/%3E%3Ccircle cx='18.5' cy='9.5' r='4' fill='%23E2A73E'/%3E%3Cpath d='M0 19c5-4 9-3.5 14-1.5s9 1 14-1V28H0z' fill='%23E8D9BC'/%3E%3Cpath d='M0 23c6-3 12-2 17-.5S24 23 28 22v6H0z' fill='%23BF5533'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&family=Suez+One&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Karantina:wght@700&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <script src="config.js"></script>
   <script src="utils.js"></script>
+  <script src="icons.js"></script>
 </head>
 <body>
 
@@ -54,7 +55,7 @@ function render(report) {
     el('section', { class: 'hero' },
       el('span', { class: 'kicker' }, 'שקיפות מלאה'),
       el('h1', {}, 'תוצאות סקר התושבים'),
-      el('p', { class: 'sub' }, report.totalRespondents + ' תושבות ותושבים השתתפו — תודה!'),
+      el('p', { class: 'sub' }, report.totalRespondents + ' תושבות ותושבים השתתפו. תודה!'),
     ),
     el('div', { class: 'card tinted small' },
       el('p', {}, 'מטעמי צנעת הפרט מוצגים כאן נתונים מצרפיים בלבד: שאלות עם פחות מ-5 תשובות ותשובות בטקסט חופשי אינן מוצגות.')
@@ -63,20 +64,22 @@ function render(report) {
 
   report.chapters.forEach(ch => {
     const card = el('div', { class: 'card' },
-      el('h3', { style: 'color:var(--primary-deep); margin-bottom:12px' }, (ch.icon || '') + ' ' + ch.title));
+      el('h3', { style: 'display:flex; align-items:center; gap:8px; margin-bottom:12px; font-size:19px' }, icon(ch.icon || 'list-checks'), ch.title));
     ch.questions.forEach(q => {
       const qWrap = el('div', { class: 'mb', style: 'padding-bottom:12px; border-bottom:1px dashed var(--line)' },
         el('p', { class: 'q-text', style: 'font-size:.98rem' }, q.text),
         el('p', { class: 'small muted' }, q.count + ' תשובות'));
 
       if (q.type === 'scale') {
+        const lo = q.min || 1, hi = q.max || 10;
+        const norm = hi > lo ? (q.avg - lo) / (hi - lo) : 0; // צבע לפי מיקום בטווח, גם בסולם 1–7
         qWrap.append(el('div', {},
-          el('span', { class: 'avg-chip ' + (q.avg >= 7 ? 'avg-good' : q.avg >= 5 ? 'avg-mid' : 'avg-low') }, q.avg.toFixed(1)),
-          el('span', { class: 'small muted' }, ' ממוצע (1–10)')));
+          el('span', { class: 'avg-chip ' + (norm >= 6 / 9 ? 'avg-good' : norm >= 4 / 9 ? 'avg-mid' : 'avg-low') }, q.avg.toFixed(1)),
+          el('span', { class: 'small muted' }, ' ממוצע (' + lo + '–' + hi + ')')));
         if (q.hist) {
           const maxH = Math.max(...Object.values(q.hist));
           const histWrap = el('div', { style: 'display:flex; gap:3px; align-items:flex-end; height:54px; margin-top:8px' });
-          for (let v = 1; v <= 10; v++) {
+          for (let v = lo; v <= hi; v++) {
             const n = q.hist[v] || 0;
             histWrap.append(el('div', { style: 'flex:1; text-align:center' },
               el('div', { style: 'background:var(--primary); opacity:' + (n ? '.85' : '.15') + '; border-radius:3px 3px 0 0; height:' + (n ? Math.max(6, (n / maxH) * 46) : 2) + 'px', title: String(n) }),

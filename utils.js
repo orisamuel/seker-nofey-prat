@@ -4,6 +4,10 @@
 
 // ── API ──────────────────────────────────────────────────
 
+// שגיאה שהשרת ניסח (למשל "הסקר סגור כרגע למענה"). מציגים אותה למשתמש כמו שהיא,
+// להבדיל מתקלת רשת שעליה מציגים הודעה כללית.
+class ServerSaid extends Error {}
+
 function isLocalMode() {
   return typeof CONFIG === 'undefined' || !CONFIG.SCRIPT_URL || CONFIG.SCRIPT_URL.includes('PASTE_');
 }
@@ -24,7 +28,8 @@ async function apiCall(action, params = {}) {
   try { return JSON.parse(text); } catch { return { success: false, message: 'Bad response', raw: text }; }
 }
 
-// כתיבות עם מטען גדול (תשובות פרק, זריעת שאלות) — POST עם גוף text/plain.
+// כתיבות, וכל קריאה שיש בה מידע אישי או סיסמה (תשובות, טלפון, הגרלה, דשבורד) — POST עם גוף text/plain,
+// כדי שהמידע לא ייכנס לכתובת ולא יישמר בלוגים ובהיסטוריה.
 // זו "בקשה פשוטה" מבחינת CORS (בלי preflight), ו-Apps Script קורא אותה מ-e.postData.
 async function apiPost(action, payload = {}) {
   if (isLocalMode()) throw new Error('SCRIPT_URL not configured');

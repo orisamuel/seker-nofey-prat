@@ -4,10 +4,10 @@
  */
 const CONFIG = {
   // כתובת ה-Web App מ-Apps Script (Deploy → Manage deployments)
-  SCRIPT_URL: 'PASTE_YOUR_DEPLOYED_SCRIPT_URL_HERE',
+  SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbyBz0e1WFXrhBSw_slxQ58ElikngdGcP9BgrC1dXRmCumXiQ1NkOVk3eGvSo03egJowfA/exec',
 
   // קישור ישיר לגיליון (לכפתור "פתח גיליון" בדשבורד)
-  SHEETS_URL: 'https://docs.google.com/spreadsheets/d/PASTE_SHEET_ID/edit',
+  SHEETS_URL: 'https://docs.google.com/spreadsheets/d/1Ya4TerGGhxIcl2K5ziu6xjDssB9bAn2J2oz9Ka6xm9c/edit',
 
   APP_NAME: 'סקר התושבים השנתי',
   YISHUV: 'נופי פרת',

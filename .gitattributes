@@ -1,0 +1,2 @@
+# סקריפטי bash חייבים סיומות שורה LF, אחרת Git Bash נכשל
+*.sh text eol=lf

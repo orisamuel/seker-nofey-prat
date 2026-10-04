@@ -3,16 +3,27 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>סקר התושבים — נופי פרת</title>
-  <meta name="description" content="סקר התושבים השנתי של נופי פרת — הדעה שלך קובעת">
-  <meta name="theme-color" content="#F6EEDF">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌿</text></svg>">
+  <title>סקר התושבים · נופי פרת</title>
+  <meta name="description" content="סקר התושבים השנתי של נופי פרת. הדעה שלך קובעת איך היישוב ייראה בשנה הקרובה">
+  <meta name="theme-color" content="#F6F1E7">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="he_IL">
+  <meta property="og:title" content="מה דעתך, נופי פרת? סקר התושבים תשפ״ז">
+  <meta property="og:description" content="בערך 10 דקות. התשובות שלך קובעות איך היישוב ייראה בשנה הקרובה. בין המסיימים מוגרל שובר של 150 ₪ לפרתיה.">
+  <!-- תמונת השיתוף בוואטסאפ -->
+  <meta property="og:url" content="https://sekernofey.online/">
+  <meta property="og:image" content="https://sekernofey.online/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3CclipPath id='c'%3E%3Ccircle cx='14' cy='14' r='14'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='28' height='28' fill='%230E6B5B'/%3E%3Ccircle cx='18.5' cy='9.5' r='4' fill='%23E2A73E'/%3E%3Cpath d='M0 19c5-4 9-3.5 14-1.5s9 1 14-1V28H0z' fill='%23E8D9BC'/%3E%3Cpath d='M0 23c6-3 12-2 17-.5S24 23 28 22v6H0z' fill='%23BF5533'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&family=Suez+One&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Karantina:wght@700&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <script src="config.js"></script>
   <script src="utils.js"></script>
+  <script src="icons.js"></script>
   <script src="survey-data.js"></script>
 </head>
 <body>
@@ -26,18 +37,23 @@
 
 <header class="topbar" id="topbar">
   <div class="topbar-in">
-    <a class="brand" href="#" onclick="goHome(); return false;">
-      <span class="brand-dot"></span>
+    <a class="brand" href="#" onclick="goHome(); return false;" aria-label="נופי פרת, למסך הבית">
+      <svg class="brand-mark" viewBox="0 0 28 28" aria-hidden="true"><clipPath id="bm"><circle cx="14" cy="14" r="14"/></clipPath><g clip-path="url(#bm)"><rect width="28" height="28" fill="#0E6B5B"/><circle cx="18.5" cy="9.5" r="4" fill="#E2A73E"/><path d="M0 19c5-4 9-3.5 14-1.5s9 1 14-1V28H0z" fill="#E8D9BC"/><path d="M0 23c6-3 12-2 17-.5S24 23 28 22v6H0z" fill="#BF5533"/></g></svg>
       <span>נופי פרת</span>
     </a>
     <div class="spacer"></div>
     <div class="progress-rail" aria-hidden="true"><div class="progress-fill" id="progressFill"></div></div>
     <span class="progress-label" id="progressLabel"></span>
-    <button class="topbar-btn save-later" onclick="showLaterModal()" title="שמירה והמשך אחר־כך">🔖 אמשיך אחר־כך</button>
-    <button class="topbar-btn" onclick="showRestartModal()" aria-label="התחלה מחדש" title="התחלה מחדש">↺</button>
-    <button class="topbar-btn" onclick="showFaq()" aria-label="שאלות ותשובות">❓</button>
+    <button class="topbar-btn save-later" onclick="showLaterModal()" title="שמירה והמשך אחר כך"><span data-icon="bookmark"></span>אמשיך אחר כך</button>
+    <button class="topbar-btn icon-only" onclick="showRestartModal()" aria-label="התחלה מחדש" title="התחלה מחדש"><span data-icon="rotate-ccw"></span></button>
+    <button class="topbar-btn icon-only" onclick="showFaq()" aria-label="שאלות ותשובות" title="שאלות ותשובות"><span data-icon="circle-help"></span></button>
   </div>
 </header>
+
+<!-- מוצג רק כשהאתר לא מחובר לשרת: התשובות לא מגיעות לצוות -->
+<div class="preview-banner" id="previewBanner" hidden>
+  תצוגה מקדימה: התשובות נשמרות רק במכשיר הזה ולא נשלחות לצוות
+</div>
 
 <main class="wrap" id="app" aria-live="polite"></main>
 
@@ -52,30 +68,57 @@ const S = {
   done: {},                // chapterId → ISO timestamp
   serverMode: false,
   raffleEntered: false,
+  view: '',                // המסך הנוכחי: landing | categories | category | chapter | closed
 };
 
 const DONE_KEY = 'np_done';
 const RAFFLE_KEY = 'np_raffle_entered';
+const VER_KEY = 'np_ver';
 const draftKey = (ch) => 'np_draft_' + ch;
 
 init();
 
 async function init() {
+  document.querySelectorAll('[data-icon]').forEach(n => n.replaceWith(icon(n.dataset.icon)));
+  resetIfNewVersion();
   S.done = JSON.parse(localStorage.getItem(DONE_KEY) || '{}');
   S.raffleEntered = localStorage.getItem(RAFFLE_KEY) === 'yes';
   S.serverMode = !isLocalMode();
+  document.getElementById('previewBanner').hidden = S.serverMode;
 
-  if (S.serverMode) {
-    warmupServer();
-    try {
-      const res = await apiCall('getSurvey');
-      if (res.success && res.survey && res.survey.chapters) S.survey = res.survey;
-    } catch (e) { /* fallback מקומי */ }
-  }
-  if (!S.survey) S.survey = window.SURVEY_DATA;
-
+  // מציגים מיד מהקובץ המוטמע, בלי לחכות לשרת (התעוררות של Apps Script לוקחת כמה שניות)
+  S.survey = window.SURVEY_DATA;
   document.getElementById('loadingScreen').classList.add('hidden');
   goHome();
+
+  if (!S.serverMode) return;
+  try {
+    const res = await apiCall('getSurvey');
+    if (res.open === false) return goClosed();
+    if (res.success && res.survey && res.survey.chapters && res.survey.chapters.length) {
+      S.survey = res.survey;
+      // הגרסה מהגיליון (שהצוות אולי ערך) נכנסת לתוקף; באמצע פרק לא מרעננים כדי לא לקטוע הקלדה
+      if (S.view === 'landing' || S.view === 'categories') goHome();
+      else updateProgress();
+    }
+  } catch (e) { /* נשארים עם הקובץ המוטמע */ }
+}
+
+// שאלון חדש = התחלה נקייה. טיוטות מגרסה קודמת (למשל של מי שבדק את הסקר מראש) נמחקות.
+function resetIfNewVersion() {
+  const ver = String((window.SURVEY_DATA.meta || {}).version || '1');
+  if (localStorage.getItem(VER_KEY) === ver) return;
+  Object.keys(localStorage).filter(k => k.startsWith('np_')).forEach(k => localStorage.removeItem(k));
+  localStorage.setItem(VER_KEY, ver);
+}
+
+function goClosed() {
+  closeModal();
+  const m = S.survey.meta;
+  const view = el('div', { class: 'land' },
+    poster(m, 'הסקר סגור כרגע למענה', 'תודה לכל מי שענה! תקציר התוצאות יפורסם לכל התושבים.', false)
+  );
+  setView(view, null, 'closed');
 }
 
 // ── עזרי מצב ─────────────────────────────────────────────
@@ -135,11 +178,12 @@ function updateProgress() {
   document.getElementById('progressLabel').textContent = hasStarted() ? done + '/' + total : '';
 }
 
-function setView(node, hue) {
+function setView(node, hue, viewName) {
   const app = document.getElementById('app');
   app.className = 'wrap' + (hue ? ' hue-' + hue : '');
   app.replaceChildren(node);
   node.classList.add('fade-in');
+  S.view = viewName || '';
   window.scrollTo({ top: 0, behavior: 'instant' });
   updateProgress();
 }
@@ -148,115 +192,84 @@ function goHome() {
   if (hasStarted()) goCategories(); else goLanding();
 }
 
-// ── מסך נחיתה ────────────────────────────────────────────
+// ── מסך פתיחה: פוסטר ─────────────────────────────────────
 
 function goLanding() {
   const m = S.survey.meta;
   const view = el('div', { class: 'land' },
-    sceneSvg(),
-    el('h1', {}, m.title, el('span', { class: 'yishuv-name' }, m.yishuv)),
-    el('p', { class: 'tagline' }, m.tagline),
-    el('p', { class: 'subline' }, m.sub),
-    el('div', { class: 'land-raffle' }, '🎁', el('span', {}, m.raffle.text)),
+    poster(m, null, m.tagline, true),
     el('div', { class: 'land-cta' },
-      el('button', { class: 'btn btn-primary', onclick: goCategories }, 'מתחילים ←'),
-      el('button', { class: 'btn btn-ghost btn-sm', onclick: showResumeByPhone }, 'כבר התחלתי במכשיר אחר')
-    )
+      el('button', { class: 'btn btn-primary btn-block', onclick: goCategories }, 'מתחילים', icon('arrow-left')),
+      el('button', { class: 'link-btn', onclick: showResumeByPhone }, 'כבר התחלתי במכשיר אחר')
+    ),
+    el('p', { class: 'land-note' }, m.sub)
   );
-  setView(view);
+  setView(view, null, 'landing');
 }
 
-// נוף ואדי פרת — סצנת הפתיחה
-function sceneSvg() {
-  const d = el('div', { class: 'land-scene', 'aria-hidden': 'true' });
-  d.innerHTML = `<svg viewBox="0 0 640 250" xmlns="http://www.w3.org/2000/svg" role="img">
-    <defs>
-      <linearGradient id="skyG" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#F9F1DF"/><stop offset="1" stop-color="#F3E5C8"/>
-      </linearGradient>
-      <linearGradient id="hill1" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#9FBCC4"/><stop offset="1" stop-color="#B9CFD4"/>
-      </linearGradient>
-      <linearGradient id="hill2" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#8FA050"/><stop offset="1" stop-color="#A8B56C"/>
-      </linearGradient>
-      <linearGradient id="hill3" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#2E6B4F"/><stop offset="1" stop-color="#3E7D5F"/>
-      </linearGradient>
-      <linearGradient id="duneG" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="#D8935F"/><stop offset="1" stop-color="#C9603B"/>
-      </linearGradient>
-    </defs>
-    <rect width="640" height="250" fill="url(#skyG)"/>
-    <circle cx="512" cy="66" r="34" fill="#E9B84E"/>
-    <circle cx="512" cy="66" r="46" fill="#E9B84E" opacity=".25"/>
-    <path d="M96 60q7-2 9-9 2 7 9 9-7 2-9 9-2-7-9-9z" fill="#C9603B" opacity=".55"/>
-    <path d="M0 168 Q90 96 190 138 T400 128 T640 150 V250 H0 Z" fill="url(#hill1)"/>
-    <path d="M0 190 Q120 120 250 162 T520 150 T640 170 V250 H0 Z" fill="url(#hill2)"/>
-    <path d="M0 215 Q140 150 300 190 T640 196 V250 H0 Z" fill="url(#hill3)"/>
-    <path d="M-10 250 Q170 236 320 244 T650 240 V250 Z" fill="#7FB6C4"/>
-    <path d="M-10 250 Q170 240 320 247 T650 244 V250 Z" fill="#A9D0DA" opacity=".7"/>
-    <path d="M0 250 Q110 210 260 232 T640 226 V250 H0 Z" fill="url(#duneG)" opacity=".92"/>
-    <g fill="#1C4A35">
-      <circle cx="118" cy="212" r="11"/><rect x="116" y="218" width="4" height="13" rx="2"/>
-      <circle cx="150" cy="220" r="8"/><rect x="148.5" y="225" width="3" height="10" rx="1.5"/>
-      <circle cx="470" cy="206" r="10"/><rect x="468" y="212" width="4" height="12" rx="2"/>
-    </g>
-    <path d="M360 84q6 6 12 0M382 92q5 5 10 0" stroke="#6B7A5A" stroke-width="2.4" fill="none" stroke-linecap="round"/>
-  </svg>`;
+// הפוסטר: כותרת גדולה על רקע לילה, שמש, וגבעות הוואדי בתחתית
+function poster(m, headline, sub, withStickers) {
+  const copy = el('div', { class: 'poster-copy' },
+    el('p', { class: 'poster-kicker' }, m.title + (m.year ? ' · ' + m.year : '')),
+    headline
+      ? el('h1', { style: 'font-size:64px' }, headline)
+      : el('h1', {}, 'מה דעתך,', el('em', {}, m.yishuv + '?')),
+    el('p', { class: 'poster-sub' }, sub)
+  );
+  const p = el('div', { class: 'poster' }, posterArt(), copy);
+  if (withStickers) {
+    p.append(
+      el('span', { class: 'sticker sticker-time', 'aria-hidden': 'true' }, el('b', {}, '10'), 'דקות'),
+      el('span', { class: 'sticker sticker-raffle' }, icon('gift'), 'הגרלה על 150 ₪')
+    );
+  }
+  return p;
+}
+
+function posterArt() {
+  const d = el('div', { class: 'poster-art', 'aria-hidden': 'true' });
+  d.innerHTML = `
+    <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" style="position:absolute;inset:0">
+      <defs>
+        <radialGradient id="pGlow" cx="85%" cy="0%" r="75%"><stop offset="0" stop-color="#F0BE5A" stop-opacity=".22"/><stop offset="1" stop-color="#F0BE5A" stop-opacity="0"/></radialGradient>
+        <filter id="pGrain"><feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .06 0"/></filter>
+      </defs>
+      <rect width="100%" height="100%" fill="url(#pGlow)"/>
+      <rect width="100%" height="100%" filter="url(#pGrain)"/>
+    </svg>
+    <span style="position:absolute;top:0;right:30px;width:118px;height:59px;border-radius:0 0 118px 118px;background:#E2A73E"></span>
+    <svg viewBox="0 0 343 140" preserveAspectRatio="none" style="position:absolute;left:0;right:0;bottom:0;width:100%;height:140px">
+      <path d="M0 46 C55 14 115 20 170 44 S280 66 343 50 V140 H0Z" fill="#E8D9BC"/>
+      <path d="M0 78 C70 54 132 64 192 80 S292 74 343 88 V140 H0Z" fill="#6B7A2E"/>
+      <path d="M20 140 C70 118 128 106 196 102 S300 98 343 104" fill="none" stroke="#8FD0C2" stroke-width="3.5" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+      <path d="M0 140 V100 C38 88 86 94 124 112 C140 120 150 132 156 140Z" fill="#BF5533"/>
+      <path d="M0 140 V124 C90 112 200 122 343 114 V140Z" fill="#0A4F44"/>
+    </svg>`;
   return d;
 }
 
-// ── מסך קטגוריות ─────────────────────────────────────────
+// ── מסך התחומים ──────────────────────────────────────────
 
 function goCategories() {
   const m = S.survey.meta;
   const stats = completionStats();
 
   const kids = [
-    el('div', { class: 'screen-head' },
-      el('h2', {}, 'במה מתחילים?'),
-      el('span', { class: 'rule', 'aria-hidden': 'true' })
-    ),
+    el('div', { class: 'screen-head' }, el('h2', {}, 'במה מתחילים?')),
   ];
 
-  // פס הגרלה
-  if (stats.complete && !S.raffleEntered) {
-    kids.push(el('div', { class: 'raffle-strip' },
-      el('span', { class: 'emoji' }, '🎉'),
-      el('span', { class: 'txt' }, el('strong', {}, 'סיימתם הכול! '), 'ההגרלה מחכה לכם'),
-      el('button', { class: 'btn btn-accent btn-sm', onclick: showRaffleModal }, 'להרשמה')
-    ));
-  } else if (stats.complete && S.raffleEntered) {
-    kids.push(el('div', { class: 'raffle-strip' },
-      el('span', { class: 'emoji' }, '🎉'),
-      el('span', { class: 'txt' }, el('strong', {}, 'סיימתם ונרשמתם להגרלה'), ' — בהצלחה!')
-    ));
-  } else {
-    const onlyAboutLeft = stats.total - stats.done === 1 && !S.done['about'];
-    kids.push(el('div', { class: 'raffle-strip' },
-      el('span', { class: 'emoji' }, '🎁'),
-      el('span', { class: 'txt' },
-        onlyAboutLeft
-          ? el('span', {}, 'נשאר רק למלא ', el('strong', {}, '"קצת עליך"'), ' — וההגרלה נפתחת!')
-          : stats.done > 0
-            ? el('span', {}, el('strong', {}, (stats.total - stats.done) + ' פרקים'), ' בינך לבין הגרלת ' + m.raffle.prize)
-            : el('span', {}, 'משלימים את הסקר ← נכנסים להגרלת ', el('strong', {}, m.raffle.prize))
-      )
-    ));
-  }
-
-  // כרטיס "קצת עליך" — מומלץ, לא חוסם
+  // "קצת עליך": מומלץ, לא חוסם
   const aboutDone = !!S.done['about'];
   kids.push(el('button', { class: 'profile-strip' + (aboutDone ? ' is-done' : ''), onclick: () => goChapter('about') },
-    el('span', { class: 'p-icon' }, '👋'),
+    el('span', { class: 'p-icon' }, icon('user-round')),
     el('span', { class: 'p-body' },
       el('span', { class: 'p-title' }, 'קצת עליך'),
-      el('span', { class: 'p-sub' }, aboutDone ? 'מולא — אפשר לעדכן בכל רגע' : 'מומלץ למלא קודם — כדי לקבל רק את השאלות שרלוונטיות אליכם')
+      el('span', { class: 'p-sub' }, aboutDone ? 'מולא, אפשר לעדכן בכל רגע' : 'חצי דקה, כדי לקבל רק את השאלות שרלוונטיות אליכם')
     ),
-    el('span', { class: 'p-status' }, aboutDone ? '✓' : 'למילוי')
+    el('span', { class: 'p-status' }, aboutDone ? icon('check') : icon('arrow-left'))
   ));
 
+  // בלוק צבעוני לכל תחום
   const grid = el('div', { class: 'cat-grid' });
   m.categories.forEach(cat => {
     const chs = catChapters(cat.id);
@@ -264,60 +277,81 @@ function goCategories() {
     const done = chs.filter(ch => S.done[ch.id]).length;
     const allDone = done === chs.length;
     grid.append(
-      el('button', { class: 'cat-card hue-' + cat.hue + (allDone ? ' cat-done' : ''), onclick: () => goCategory(cat.id) },
-        allDone ? el('span', { class: 'cat-done-badge' }, '✓') : null,
-        el('span', { class: 'cat-icon' }, cat.icon),
+      el('button', { class: 'cat-card hue-' + cat.hue + (allDone ? ' cat-done' : ''), onclick: () => goCategory(cat.id),
+                     'aria-label': cat.title + ', ' + done + ' מתוך ' + chs.length + ' נושאים' },
+        el('span', { class: 'cat-icon' }, icon(cat.icon)),
+        el('span', { class: 'cat-count', 'aria-hidden': 'true' }, allDone ? icon('check') : done + '/' + chs.length),
         el('span', { class: 'cat-title' }, cat.title),
-        el('span', { class: 'cat-meta' }, done + '/' + chs.length + ' נושאים'),
-        el('span', { class: 'cat-prog' }, el('span', { style: 'display:block; width:' + (chs.length ? Math.round((done / chs.length) * 100) : 0) + '%' }))
+        el('span', { class: 'cat-meta' }, allDone ? 'הושלם' : chs.length + ' נושאים')
       )
     );
   });
   kids.push(grid);
 
-  setView(el('div', {}, ...kids));
+  // פס ההגרלה
+  const left = stats.total - stats.done;
+  const strip = (txt, action) => el('div', { class: 'raffle-strip' },
+    el('span', { class: 'r-icon' }, icon('gift')), el('span', { class: 'txt' }, ...txt), action || null);
+  if (stats.complete && !S.raffleEntered) {
+    kids.push(strip([el('strong', {}, 'סיימתם הכול! '), 'ההגרלה מחכה לכם'],
+      el('button', { class: 'btn btn-accent btn-sm', onclick: showRaffleModal }, 'להרשמה')));
+  } else if (stats.complete && S.raffleEntered) {
+    kids.push(strip([el('strong', {}, 'סיימתם ונרשמתם להגרלה'), ', בהצלחה!']));
+  } else if (left === 1 && !S.done['about']) {
+    kids.push(strip(['נשאר רק למלא ', el('strong', {}, '"קצת עליך"'), ' וההגרלה נפתחת!']));
+  } else if (stats.done > 0) {
+    kids.push(strip([el('strong', {}, left === 1 ? 'עוד נושא אחד' : 'עוד ' + left + ' נושאים'), ' ואתם בהגרלת ' + m.raffle.prize]));
+  } else {
+    kids.push(strip(['משלימים את הסקר ונכנסים להגרלת ', el('strong', {}, m.raffle.prize)]));
+  }
+
+  setView(el('div', {}, ...kids), null, 'categories');
 }
 
-// ── מסך קטגוריה ──────────────────────────────────────────
+// ── מסך תחום ─────────────────────────────────────────────
 
 function goCategory(catId) {
   const cat = S.survey.meta.categories.find(c => c.id === catId);
   if (!cat) return goCategories();
   const chs = catChapters(catId);
   const next = chs.find(ch => !S.done[ch.id]);
+  const doneCount = chs.filter(c => S.done[c.id]).length;
 
   const list = el('div', { class: 'chap-list' });
   chs.forEach(ch => {
     const st = chapterState(ch);
-    const stText = { done: '✓', skipped: 'דילגתם', partial: 'באמצע', new: (visibleQuestionCount(ch)) + ' שאלות' }[st];
+    const status = {
+      done: [icon('check'), 'נענה'],
+      skipped: ['דילגתם'],
+      partial: ['באמצע'],
+      new: [visibleQuestionCount(ch) === 1 ? 'שאלה אחת' : visibleQuestionCount(ch) + ' שאלות'],
+    }[st];
     list.append(
       el('button', { class: 'chap-row is-' + (st === 'skipped' ? 'done' : st), onclick: () => goChapter(ch.id) },
-        el('span', { class: 'ch-icon' }, ch.icon || '📋'),
+        el('span', { class: 'ch-icon' }, icon(ch.icon || 'list-checks')),
         el('span', { class: 'ch-body' },
           el('span', { class: 'ch-title', text: ch.title }),
-          ch.desc ? el('span', {}, el('br'), el('span', { class: 'ch-meta', text: ch.desc })) : null
+          ch.desc ? el('span', { class: 'ch-meta', text: ch.desc }) : null
         ),
-        el('span', { class: 'ch-status' }, stText)
+        el('span', { class: 'ch-status' }, ...status)
       )
     );
   });
 
   const view = el('div', {},
     el('div', { class: 'cat-hero' },
-      el('span', { class: 'cat-icon' }, cat.icon),
-      el('div', {},
-        el('h2', {}, cat.title),
-        el('p', {}, chs.filter(c => S.done[c.id]).length + '/' + chs.length + ' נושאים הושלמו')
-      )
+      el('span', { class: 'cat-icon' }, icon(cat.icon)),
+      el('h2', {}, cat.title),
+      el('p', {}, doneCount + ' מתוך ' + chs.length + ' נושאים הושלמו')
     ),
-    next ? el('button', { class: 'btn btn-primary btn-block mb', onclick: () => goChapter(next.id) },
-      (S.done[chs[0]?.id] || Object.keys(S.done).length ? 'לנושא הבא: ' : 'מתחילים: ') + next.title + ' ←') : null,
+    next ? el('button', { class: 'btn btn-primary btn-block', onclick: () => goChapter(next.id) },
+      (doneCount ? 'לנושא הבא: ' : 'מתחילים: ') + next.title, icon('arrow-left')) : null,
     list,
     el('div', { class: 'mt center' },
-      el('button', { class: 'btn btn-ghost btn-sm', onclick: goCategories }, 'לכל התחומים')
+      el('button', { class: 'link-btn', onclick: goCategories }, 'לכל התחומים')
     )
   );
-  setView(view, cat.hue);
+  setView(view, cat.hue, 'category');
 }
 
 function visibleQuestionCount(ch) {
@@ -339,7 +373,7 @@ function goChapter(chId) {
 
   container.append(
     el('div', { class: 'chapter-header' },
-      el('span', { class: 'ch-icon' }, ch.icon || '📋'),
+      el('span', { class: 'ch-icon' }, icon(ch.icon || 'list-checks')),
       el('div', {},
         el('h2', {}, ch.title),
         ch.desc ? el('p', { class: 'ch-desc' }, ch.desc) : null
@@ -347,28 +381,36 @@ function goChapter(chId) {
     )
   );
   if (cat && pos >= 0) {
-    container.append(el('p', { class: 'chapter-pos' }, cat.icon + ' ' + cat.title + ' · נושא ' + (pos + 1) + ' מתוך ' + chs.length));
+    container.append(el('div', { class: 'chapter-pos' },
+      el('span', {}, cat.title + ' · נושא ' + (pos + 1) + ' מתוך ' + chs.length),
+      el('span', { class: 'steps', 'aria-hidden': 'true' },
+        ...chs.map((c, i) => el('i', { class: i === pos || S.done[c.id] ? 'on' : '' })))
+    ));
   }
+  // פתיח וסיום בקול של הוועדה (למשל ועדת התרבות)
+  if (ch.intro) container.append(el('p', { class: 'ch-intro' }, ch.intro));
 
   const qWrap = el('div', {});
   ch.questions.forEach(q => qWrap.append(renderQuestion(ch, q, answers)));
   container.append(qWrap);
 
+  if (ch.outro) container.append(el('p', { class: 'ch-outro' }, ch.outro));
+
   if (ch.id !== 'about') {
     container.append(el('p', { class: 'center' },
-      el('button', { class: 'skip-link', onclick: () => skipChapter(ch) }, 'הנושא לא רלוונטי אליי — לנושא הבא ←')
+      el('button', { class: 'skip-link', onclick: () => skipChapter(ch) }, 'הנושא לא רלוונטי אליי, לנושא הבא ←')
     ));
   }
 
   container.append(
     el('div', { class: 'chapter-nav' },
-      el('button', { class: 'btn btn-ghost', onclick: () => ch.cat ? goCategory(ch.cat) : goCategories() }, '↩'),
+      el('button', { class: 'btn btn-ghost btn-round', 'aria-label': 'חזרה', title: 'חזרה', onclick: () => ch.cat ? goCategory(ch.cat) : goCategories() }, icon('arrow-right')),
       el('button', { class: 'btn btn-primary', id: 'submitBtn', onclick: () => submitChapter(ch) },
-        ch.id === 'about' ? 'שמירה ←' : (S.done[chId] ? 'עדכון ← והלאה' : 'שמירה ← והלאה'))
+        ch.id === 'about' ? 'שמירה' : (S.done[chId] ? 'עדכון והמשך' : 'שמירה והמשך'), icon('arrow-left'))
     )
   );
 
-  setView(container, cat ? cat.hue : 'green');
+  setView(container, cat ? cat.hue : 'green', 'chapter');
   refreshVisibility(ch);
 }
 
@@ -411,8 +453,11 @@ function renderQuestion(ch, q, answers) {
 
 function renderScale(ch, q, answers) {
   const wrap = el('div', {});
+  const lo = q.min || 1, hi = q.max || 10;
   const grid = el('div', { class: 'scale-grid', role: 'radiogroup', 'aria-label': q.text });
-  for (let v = q.min || 1; v <= (q.max || 10); v++) {
+  // סולם קצר (למשל 1–7) נכנס בשורה אחת גם במובייל; 1–10 נשבר ל-5+5
+  if (hi - lo + 1 <= 7) grid.style.gridTemplateColumns = 'repeat(' + (hi - lo + 1) + ', 1fr)';
+  for (let v = lo; v <= hi; v++) {
     const chip = el('button', {
       class: 'scale-chip' + (answers[q.id] === v ? ' sel' : ''),
       type: 'button', role: 'radio', 'aria-checked': answers[q.id] === v ? 'true' : 'false',
@@ -453,6 +498,9 @@ function renderChoice(ch, q, answers, multi) {
   };
 
   let otherBox = null;
+  // בחירה מרובה עם תקרה (למשל "בחר 3"): בהגעה לתקרה שאר האפשרויות מתעמעמות
+  const maxSel = multi && q.max ? Number(q.max) : 0;
+  const atMax = () => maxSel > 0 && current().length >= maxSel;
 
   const rebuild = () => {
     wrap.querySelectorAll('.opt').forEach(o => {
@@ -460,6 +508,7 @@ function renderChoice(ch, q, answers, multi) {
       o.classList.toggle('sel', isSel(opt));
       o.setAttribute('aria-checked', isSel(opt) ? 'true' : 'false');
     });
+    wrap.classList.toggle('maxed', atMax());
     if (otherBox) otherBox.style.display = isSel('אחר') ? '' : 'none';
   };
 
@@ -471,6 +520,11 @@ function renderChoice(ch, q, answers, multi) {
       onclick: () => {
         if (multi) {
           let cur = current().slice();
+          const adding = !isSel(opt) && !(q.exclusive && opt === q.exclusive);
+          if (adding && atMax()) {
+            showToast('אפשר לבחור עד ' + maxSel + '. כדי להחליף, בטלו קודם בחירה אחרת', 'warning');
+            return;
+          }
           if (opt === 'אחר') {
             if (isSel('אחר')) cur = cur.filter(v => !v.startsWith(OTHER_PREFIX));
             else cur.push(OTHER_PREFIX);
@@ -490,7 +544,7 @@ function renderChoice(ch, q, answers, multi) {
         rebuild();
       }
     },
-      el('span', { class: 'mark', 'aria-hidden': 'true' }),
+      el('span', { class: 'mark', 'aria-hidden': 'true' }, icon('check')),
       el('span', {}, opt)
     );
     wrap.append(btn);
@@ -521,6 +575,7 @@ function renderChoice(ch, q, answers, multi) {
     wrap.append(otherBox);
   }
 
+  wrap.classList.toggle('maxed', atMax());
   return wrap;
 }
 
@@ -637,27 +692,28 @@ async function submitChapter(ch) {
 
   if (!Object.keys(visAns).length) {
     openModal(el('div', { class: 'modal' },
-      el('h3', {}, 'עוד לא עניתם כאן'),
-      el('p', {}, 'אפשר לענות אפילו על שאלה אחת — או לסמן שהנושא לא רלוונטי ולהמשיך הלאה.'),
-      el('div', { class: 'mt', style: 'display:grid; gap:8px' },
+      el('h3', {}, icon('circle-help'), 'עוד לא עניתם כאן'),
+      el('p', {}, 'אפשר לענות אפילו על שאלה אחת, או לסמן שהנושא לא רלוונטי ולהמשיך הלאה.'),
+      el('div', { class: 'mt', style: 'display:grid; gap:10px' },
         el('button', { class: 'btn btn-primary', onclick: closeModal }, 'למענה'),
-        el('button', { class: 'btn btn-ghost', onclick: () => { closeModal(); skipChapter(ch); } }, 'הנושא לא רלוונטי אליי — לנושא הבא ←')
+        el('button', { class: 'btn btn-ghost', onclick: () => { closeModal(); skipChapter(ch); } }, 'הנושא לא רלוונטי אליי, לנושא הבא ←')
       )
     ));
     return;
   }
 
+  const btnContent = [...btn.childNodes];
   btn.disabled = true;
   btn.textContent = 'שומר…';
 
   if (S.serverMode) {
     try {
       const res = await apiPost('submitChapter', { rid: getRid(), chapter: ch.id, answers: visAns });
-      if (!res.success) throw new Error(res.message || 'שגיאה בשמירה');
+      if (!res.success) throw new ServerSaid(res.message);
     } catch (e) {
       btn.disabled = false;
-      btn.textContent = 'שמירה ← והלאה';
-      showToast('השמירה נכשלה — בדקו חיבור ונסו שוב', 'error', 5000);
+      btn.replaceChildren(...btnContent);
+      showToast(e instanceof ServerSaid && e.message ? e.message : 'השמירה נכשלה. בדקו את החיבור ונסו שוב', 'error', 5000);
       return;
     }
   }
@@ -673,9 +729,9 @@ async function skipChapter(ch) {
   if (S.serverMode) {
     try {
       const res = await apiPost('submitChapter', { rid: getRid(), chapter: ch.id, answers: { _skipped: 'כן' } });
-      if (!res.success) throw new Error(res.message || '');
+      if (!res.success) throw new ServerSaid(res.message);
     } catch (e) {
-      showToast('לא הצליח — בדקו חיבור ונסו שוב', 'error');
+      showToast(e instanceof ServerSaid && e.message ? e.message : 'לא הצליח. בדקו את החיבור ונסו שוב', 'error');
       return;
     }
   }
@@ -710,50 +766,55 @@ function afterChapterDone(ch, skipped) {
   }
 }
 
-// ── "אמשיך אחר־כך" + המשך לפי טלפון ─────────────────────
-
-async function hashPhone(phone) {
-  const digits = phone.replace(/[^0-9]/g, '');
-  const data = new TextEncoder().encode('np-salt-' + digits);
-  if (crypto.subtle) {
-    const buf = await crypto.subtle.digest('SHA-256', data);
-    return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-  // fallback: FNV-1a
-  let h = 0x811c9dc5;
-  for (const b of data) { h ^= b; h = Math.imul(h, 0x01000193) >>> 0; }
-  return 'f' + h.toString(16);
-}
+// ── "אמשיך אחר כך" + המשך ממכשיר אחר (טלפון + קוד בן 4 ספרות) ──
+// הקוד הוא מה שמגן על התשובות: בלי קוד, כל מי שיודע את המספר של שכן היה יכול לטעון את התשובות שלו.
+// השרת שומר את הטלפון רק כחתימה מוצפנת עם מפתח סודי, ומגביל ניסיונות.
 
 function validPhone(p) {
   return /^0\d{8,9}$/.test(p.replace(/[^0-9]/g, ''));
 }
 
+function validPin(p) {
+  return /^\d{4}$/.test(p.trim());
+}
+
+function phoneInput() {
+  return el('input', { class: 'txt-input', placeholder: '05X-XXXXXXX', type: 'tel', inputmode: 'tel', autocomplete: 'tel', dir: 'ltr', style: 'text-align:center', 'aria-label': 'טלפון' });
+}
+
+function pinInput(placeholder) {
+  return el('input', { class: 'txt-input mt pin-input', placeholder, type: 'text', inputmode: 'numeric', maxlength: '4', autocomplete: 'off', dir: 'ltr', 'aria-label': 'קוד בן 4 ספרות' });
+}
+
 function showLaterModal() {
-  const phoneIn = el('input', { class: 'txt-input', placeholder: '05X-XXXXXXX', type: 'tel', inputmode: 'tel', dir: 'ltr', style: 'text-align:center', 'aria-label': 'טלפון' });
+  const phoneIn = phoneInput();
+  const pinIn = pinInput('בחרו קוד בן 4 ספרות');
   const modal = el('div', { class: 'modal' },
-    el('h3', {}, '🔖 ממשיכים מתי שנוח'),
-    el('p', {}, 'ההתקדמות נשמרת אוטומטית במכשיר הזה — אפשר פשוט לסגור ולחזור.'),
-    el('p', {}, el('strong', {}, 'רוצים להמשיך ממכשיר אחר?'), ' השאירו טלפון ותוכלו להזדהות איתו שם. המספר לא מקושר לתשובות.'),
-    phoneIn,
-    el('div', { class: 'mt', style: 'display:flex; gap:8px' },
+    el('h3', {}, icon('bookmark'), 'ממשיכים מתי שנוח'),
+    el('p', {}, 'ההתקדמות נשמרת אוטומטית במכשיר הזה, אפשר פשוט לסגור ולחזור.'),
+    el('p', {}, el('strong', {}, 'רוצים להמשיך ממכשיר אחר?'), ' השאירו טלפון ובחרו קוד. במכשיר השני תזינו את שניהם.'),
+    phoneIn, pinIn,
+    el('p', { class: 'small muted mt' }, 'המספר לא נשמר כמו שהוא, והצוות לא יכול לראות אותו.'),
+    el('div', { class: 'modal-actions' },
       el('button', {
         class: 'btn btn-primary', style: 'flex:1', onclick: async (e) => {
-          const phone = phoneIn.value.trim();
+          const b = e.currentTarget; // הכפתור עצמו, גם כשלוחצים על האייקון שבתוכו
+          const phone = phoneIn.value.trim(), pin = pinIn.value.trim();
           if (!validPhone(phone)) { showToast('בדקו את מספר הטלפון', 'warning'); return; }
+          if (!validPin(pin)) { showToast('הקוד צריך להיות 4 ספרות', 'warning'); return; }
           if (!S.serverMode) { showToast('יעבוד אחרי חיבור המערכת לשרת', 'warning'); return; }
-          e.target.disabled = true;
+          b.disabled = true;
           try {
-            const res = await apiCall('linkResume', { hash: await hashPhone(phone), rid: getRid() });
-            if (!res.success) throw new Error(res.message);
+            const res = await apiPost('linkResume', { phone, pin, rid: getRid() });
+            if (!res.success) throw new ServerSaid(res.message);
             closeModal();
-            showToast('מעולה! מכל מכשיר: "כבר התחלתי" + המספר שלכם', 'success', 4500);
+            showToast('נשמר! במכשיר השני: "כבר התחלתי במכשיר אחר", הטלפון והקוד', 'success', 5000);
           } catch (err) {
-            e.target.disabled = false;
-            showToast(err.message || 'לא הצליח — נסו שוב', 'error');
+            b.disabled = false;
+            showToast(err instanceof ServerSaid && err.message ? err.message : 'לא הצליח, נסו שוב', 'error');
           }
         }
-      }, 'שמירת טלפון'),
+      }, 'שמירה'),
       el('button', { class: 'btn btn-ghost', onclick: closeModal }, 'סגירה')
     )
   );
@@ -761,21 +822,24 @@ function showLaterModal() {
 }
 
 function showResumeByPhone() {
-  const phoneIn = el('input', { class: 'txt-input', placeholder: '05X-XXXXXXX', type: 'tel', inputmode: 'tel', dir: 'ltr', style: 'text-align:center', 'aria-label': 'טלפון' });
+  const phoneIn = phoneInput();
+  const pinIn = pinInput('הקוד שבחרתם');
   const modal = el('div', { class: 'modal' },
-    el('h3', {}, 'ממשיכים מאיפה שעצרתם'),
-    el('p', {}, 'הזינו את הטלפון שהשארתם במכשיר הקודם:'),
-    phoneIn,
-    el('div', { class: 'mt', style: 'display:flex; gap:8px' },
+    el('h3', {}, icon('smartphone'), 'ממשיכים מאיפה שעצרתם'),
+    el('p', {}, 'הזינו את הטלפון והקוד שבחרתם במכשיר הקודם:'),
+    phoneIn, pinIn,
+    el('div', { class: 'modal-actions' },
       el('button', {
         class: 'btn btn-primary', style: 'flex:1', onclick: async (e) => {
-          const phone = phoneIn.value.trim();
+          const b = e.currentTarget; // הכפתור עצמו, גם כשלוחצים על האייקון שבתוכו
+          const phone = phoneIn.value.trim(), pin = pinIn.value.trim();
           if (!validPhone(phone)) { showToast('בדקו את מספר הטלפון', 'warning'); return; }
+          if (!validPin(pin)) { showToast('הקוד צריך להיות 4 ספרות', 'warning'); return; }
           if (!S.serverMode) { showToast('יעבוד אחרי חיבור המערכת לשרת', 'warning'); return; }
-          e.target.disabled = true;
+          b.disabled = true;
           try {
-            const res = await apiCall('resumeByHash', { hash: await hashPhone(phone) });
-            if (!res.success) throw new Error(res.message);
+            const res = await apiPost('resumeByPhone', { phone, pin });
+            if (!res.success) throw new ServerSaid(res.message);
             setRid(res.rid);
             S.done = {};
             for (const [chId, data] of Object.entries(res.chapters || {})) {
@@ -787,8 +851,8 @@ function showResumeByPhone() {
             showToast('ברוכים השבים! 👋', 'success');
             goCategories();
           } catch (err) {
-            e.target.disabled = false;
-            showToast(err.message || 'לא מצאנו — בדקו את המספר', 'error');
+            b.disabled = false;
+            showToast(err instanceof ServerSaid && err.message ? err.message : 'לא הצליח, בדקו את החיבור ונסו שוב', 'error');
           }
         }
       }, 'המשך'),
@@ -802,9 +866,9 @@ function showResumeByPhone() {
 
 function showRestartModal() {
   const modal = el('div', { class: 'modal' },
-    el('h3', {}, '↺ להתחיל מחדש?'),
+    el('h3', {}, icon('rotate-ccw'), 'להתחיל מחדש?'),
     el('p', {}, 'כל התשובות שלך יימחקו ותוכל להתחיל את הסקר מחדש. האם אתה בטוח?'),
-    el('div', { class: 'mt', style: 'display:flex; gap:8px' },
+    el('div', { class: 'modal-actions' },
       el('button', { class: 'btn btn-accent', style: 'flex:1', onclick: restartAll }, 'כן, מתחילים מחדש'),
       el('button', { class: 'btn btn-ghost', style: 'flex:1', onclick: closeModal }, 'ביטול')
     )
@@ -812,13 +876,26 @@ function showRestartModal() {
   openModal(modal);
 }
 
-function restartAll() {
+async function restartAll(e) {
+  const b = e && e.currentTarget;
+  // בשרת: מסמנים את התשובות הקודמות כמבוטלות, אחרת העונה נספר פעמיים בתוצאות
+  if (S.serverMode && Object.keys(S.done).length) {
+    if (b) b.disabled = true;
+    try {
+      const res = await apiPost('discard', { rid: getRid() });
+      if (!res.success) throw new ServerSaid(res.message);
+    } catch (err) {
+      if (b) b.disabled = false;
+      showToast(err instanceof ServerSaid && err.message ? err.message : 'לא הצליח, בדקו את החיבור ונסו שוב', 'error');
+      return;
+    }
+  }
   Object.keys(localStorage)
-    .filter(k => k.startsWith('np_'))
+    .filter(k => k.startsWith('np_') && k !== VER_KEY)
     .forEach(k => localStorage.removeItem(k));
   S.done = {};
   S.raffleEntered = false;
-  setRid(makeRid()); // זהות אנונימית חדשה — התשובות הישנות מנותקות
+  setRid(makeRid()); // זהות אנונימית חדשה
   closeModal();
   showToast('התחלנו דף חדש 🌱', 'success');
   goLanding();
@@ -854,36 +931,37 @@ function showRaffleModal() {
   const phoneIn = el('input', { class: 'txt-input mt', placeholder: 'טלפון נייד', type: 'tel', inputmode: 'tel', dir: 'ltr', style: 'text-align:center', 'aria-label': 'טלפון' });
 
   const modal = el('div', { class: 'modal' },
-    el('div', { class: 'center', style: 'font-size:2.6rem' }, '🎁'),
-    el('h3', { class: 'center' }, 'סיימתם הכול — הגרלה!'),
+    el('div', { class: 'center', style: 'font-size:46px; color:var(--terra); line-height:1' }, icon('gift')),
+    el('h3', { style: 'justify-content:center; margin-top:6px' }, 'סיימתם הכול, נכנסים להגרלה!'),
     el('p', { class: 'center' }, m.prize + ' יכול להיות שלכם.'),
     el('p', { class: 'small muted center' }, m.note),
     nameIn, phoneIn,
-    el('div', { class: 'mt', style: 'display:flex; gap:8px' },
+    el('div', { class: 'modal-actions' },
       el('button', {
         class: 'btn btn-accent', style: 'flex:1', onclick: async (e) => {
+          const b = e.currentTarget; // הכפתור עצמו, גם כשלוחצים על האייקון שבתוכו
           const name = nameIn.value.trim(), phone = phoneIn.value.trim();
           if (name.length < 2) { showToast('נשמח לשם מלא', 'warning'); return; }
           if (!validPhone(phone)) { showToast('בדקו את מספר הטלפון', 'warning'); return; }
-          e.target.disabled = true;
-          e.target.textContent = 'נרשם…';
+          if (!S.serverMode) { showToast('בתצוגה המקדימה אין הרשמה. היא תיפתח כשהסקר יעלה לאוויר', 'warning', 4500); return; }
+          b.disabled = true;
+          b.textContent = 'נרשם…';
           try {
-            if (S.serverMode) {
-              const res = await apiCall('enterRaffle', { rid: getRid(), name, phone });
-              if (!res.success) throw new Error(res.message);
-            }
+            // POST: שם וטלפון לא נכנסים לכתובת (שנשמרת בלוגים)
+            const res = await apiPost('enterRaffle', { rid: getRid(), name, phone });
+            if (!res.success) throw new ServerSaid(res.message);
             S.raffleEntered = true;
             localStorage.setItem(RAFFLE_KEY, 'yes');
             closeModal();
-            showToast('נרשמתם — בהצלחה! 🎉', 'success', 5000);
+            showToast('נרשמתם, בהצלחה! 🎉', 'success', 5000);
             goCategories();
           } catch (err) {
-            e.target.disabled = false;
-            e.target.textContent = 'הרשמה 🎁';
-            showToast(err.message || 'ההרשמה נכשלה — נסו שוב', 'error');
+            b.disabled = false;
+            b.replaceChildren('הרשמה', icon('gift'));
+            showToast(err instanceof ServerSaid && err.message ? err.message : 'ההרשמה נכשלה, נסו שוב', 'error');
           }
         }
-      }, 'הרשמה 🎁'),
+      }, 'הרשמה', icon('gift')),
       el('button', { class: 'btn btn-ghost', onclick: () => { closeModal(); goCategories(); } }, 'אחר כך')
     )
   );
