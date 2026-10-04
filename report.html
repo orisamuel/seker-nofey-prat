@@ -4,13 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>תוצאות הסקר · נופי פרת</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌿</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3CclipPath id='c'%3E%3Ccircle cx='14' cy='14' r='14'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='28' height='28' fill='%230E6B5B'/%3E%3Ccircle cx='18.5' cy='9.5' r='4' fill='%23E2A73E'/%3E%3Cpath d='M0 19c5-4 9-3.5 14-1.5s9 1 14-1V28H0z' fill='%23E8D9BC'/%3E%3Cpath d='M0 23c6-3 12-2 17-.5S24 23 28 22v6H0z' fill='%23BF5533'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&family=Suez+One&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Karantina:wght@700&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <script src="config.js"></script>
   <script src="utils.js"></script>
+  <script src="icons.js"></script>
 </head>
 <body>
 
@@ -63,7 +64,7 @@ function render(report) {
 
   report.chapters.forEach(ch => {
     const card = el('div', { class: 'card' },
-      el('h3', { style: 'color:var(--primary-deep); margin-bottom:12px' }, (ch.icon || '') + ' ' + ch.title));
+      el('h3', { style: 'display:flex; align-items:center; gap:8px; margin-bottom:12px; font-size:19px' }, icon(ch.icon || 'list-checks'), ch.title));
     ch.questions.forEach(q => {
       const qWrap = el('div', { class: 'mb', style: 'padding-bottom:12px; border-bottom:1px dashed var(--line)' },
         el('p', { class: 'q-text', style: 'font-size:.98rem' }, q.text),

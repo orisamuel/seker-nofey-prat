@@ -5,13 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>דשבורד צוות · סקר נופי פרת</title>
   <meta name="robots" content="noindex">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3CclipPath id='c'%3E%3Ccircle cx='14' cy='14' r='14'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='28' height='28' fill='%230E6B5B'/%3E%3Ccircle cx='18.5' cy='9.5' r='4' fill='%23E2A73E'/%3E%3Cpath d='M0 19c5-4 9-3.5 14-1.5s9 1 14-1V28H0z' fill='%23E8D9BC'/%3E%3Cpath d='M0 23c6-3 12-2 17-.5S24 23 28 22v6H0z' fill='%23BF5533'/%3E%3C/g%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@400;500;600;700&family=Suez+One&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Karantina:wght@700&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <script src="config.js"></script>
   <script src="utils.js"></script>
+  <script src="icons.js"></script>
 </head>
 <body>
 
@@ -40,7 +41,7 @@ function renderLogin(err) {
   const pwIn = el('input', { class: 'txt-input', type: 'password', placeholder: 'סיסמת הצוות', 'aria-label': 'סיסמה' });
   pwIn.addEventListener('keydown', e => { if (e.key === 'Enter') load(pwIn.value); });
   const view = el('div', { class: 'card', style: 'max-width:400px; margin:60px auto' },
-    el('h2', { class: 'mb' }, '🔐 כניסת צוות'),
+    el('h2', { class: 'mb' }, 'כניסת צוות'),
     err ? el('p', { class: 'small', style: 'color:var(--danger)' }, err) : null,
     pwIn,
     el('button', { class: 'btn btn-primary btn-block mt', onclick: () => load(pwIn.value) }, 'כניסה')
@@ -85,19 +86,19 @@ function render() {
   const app = document.getElementById('app');
 
   const tabs = el('div', { class: 'pill-tabs' });
-  const mkTab = (id, label) => el('button', {
+  const mkTab = (id, ...label) => el('button', {
     class: 'pill-tab' + (D.currentTab === id ? ' sel' : ''),
     onclick: () => { D.currentTab = id; render(); }
-  }, label);
-  tabs.append(mkTab('overview', '📈 מבט-על'));
-  D.survey.chapters.forEach(ch => tabs.append(mkTab(ch.id, (ch.icon || '') + ' ' + ch.title)));
+  }, ...label);
+  tabs.append(mkTab('overview', 'מבט על'));
+  D.survey.chapters.forEach(ch => tabs.append(mkTab(ch.id, icon(ch.icon || 'list-checks'), ch.title)));
 
   const kids = [
     el('div', { class: 'stat-row', style: 'margin-top:20px' },
       statTile(rids.length, 'עונים'),
       statTile(D.rows.length, 'פרקים שהוגשו'),
       statTile(rids.length ? (D.rows.length / rids.length).toFixed(1) : '0', 'פרקים לעונה בממוצע'),
-      statTile(D.raffleCount, 'נרשמו להגרלה 🎁'),
+      statTile(D.raffleCount, 'נרשמו להגרלה'),
     ),
     tabs,
   ];
@@ -124,7 +125,7 @@ function renderOverview() {
     const n = chapterRespondents(ch.id);
     card.append(el('div', { class: 'bar-row' },
       el('div', {},
-        el('div', { class: 'bar-name' }, (ch.icon || '') + ' ' + ch.title),
+        el('div', { class: 'bar-name' }, icon(ch.icon || 'list-checks'), ch.title),
         el('div', { class: 'bar-track' }, el('div', { class: 'bar-fill', style: 'width:' + Math.round((n / max) * 100) + '%' }, String(n)))
       ),
       el('button', { class: 'btn btn-ghost btn-sm', onclick: () => { D.currentTab = ch.id; render(); } }, 'פירוט')
@@ -147,11 +148,11 @@ function renderOverview() {
     const lows = scales.slice(0, 8), highs = scales.slice(-8).reverse();
     wrap.append(
       el('div', { class: 'card' },
-        el('h3', { class: 'mb' }, '🔻 הציונים הנמוכים ביותר: כאן כואב'),
+        el('h3', { class: 'mb' }, 'הציונים הנמוכים ביותר: כאן כואב'),
         ...lows.map(s => scaleRow(s))
       ),
       el('div', { class: 'card' },
-        el('h3', { class: 'mb' }, '🔺 הציונים הגבוהים ביותר: מה עובד'),
+        el('h3', { class: 'mb' }, 'הציונים הגבוהים ביותר: מה עובד'),
         ...highs.map(s => scaleRow(s))
       )
     );
@@ -163,7 +164,7 @@ function scaleRow(s) {
   return el('div', { class: 'bar-row' },
     el('div', {},
       el('div', { class: 'bar-name' }, s.q.text),
-      el('div', { class: 'small muted' }, (s.ch.icon || '') + ' ' + s.ch.title + ' · ' + s.n + ' תשובות')
+      el('div', { class: 'small muted' }, s.ch.title + ' · ' + s.n + ' תשובות')
     ),
     avgChip(s.avg, s.q)
   );
@@ -190,7 +191,7 @@ function chapterRespondents(chId) {
 function renderChapter(ch) {
   const wrap = el('div', {});
   wrap.append(el('div', { class: 'chapters-head' },
-    el('h2', {}, (ch.icon || '') + ' ' + ch.title),
+    el('h2', {}, icon(ch.icon || 'list-checks'), ch.title),
     el('p', {}, chapterRespondents(ch.id) + ' עונים הגישו את הפרק')
   ));
 
