@@ -1062,7 +1062,8 @@ function showRaffleModal() {
           try {
             // POST: שם וטלפון לא נכנסים לכתובת (שנשמרת בלוגים)
             const res = await apiPost('enterRaffle', { rid: getRid(), name, phone });
-            if (!res.success) throw new ServerSaid(res.message);
+            // ניסיון חוזר אחרי שההרשמה הראשונה כבר נקלטה מחזיר "כבר רשום": זו הצלחה
+            if (!res.success && !(res.retried && /כבר רשום/.test(res.message || ''))) throw new ServerSaid(res.message);
             S.raffleEntered = true;
             localStorage.setItem(RAFFLE_KEY, 'yes');
             closeModal();

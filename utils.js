@@ -18,30 +18,47 @@ function warmupServer() {
   fetch(CONFIG.SCRIPT_URL + '?action=ping').catch(() => {});
 }
 
-// הדרך היחידה לקרוא לשרת — תמיד GET (CORS פשוט, בלי preflight)
+// Apps Script עונה בהפניה לכתובת זמנית של גוגל, ובערך פעם בעשר זה נכשל בצד של גוגל: מגיע דף שגיאה
+// (שהדפדפן מציג כשגיאת רשת), או שהבקשה מגיעה לשרת בלי הפרמטרים ("Unknown action: undefined").
+// אז מנסים שוב, פעם אחת. כל הפעולות בטוחות לניסיון חוזר (בהגרלה: ראו showRaffleModal ב-index.html).
+async function withRetry(send) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const data = await send();
+      const flaky = data.raw !== undefined || /^Unknown action: undefined/.test(data.message || '');
+      if (!flaky) { if (attempt > 1) data.retried = true; return data; }
+      if (attempt >= 2) return { success: false, message: 'לא הצליח, נסו שוב', retried: true };
+    } catch (e) {
+      if (attempt >= 2) throw e;
+    }
+    await new Promise(r => setTimeout(r, 700));
+  }
+}
+
+async function readJson(res) {
+  if (!res.ok) throw new Error('Server error: ' + res.status);
+  const text = await res.text();
+  try { return JSON.parse(text); } catch { return { success: false, raw: text }; }
+}
+
+// קריאות ציבוריות — GET (CORS פשוט, בלי preflight)
 async function apiCall(action, params = {}) {
   if (isLocalMode()) throw new Error('SCRIPT_URL not configured');
   const url = CONFIG.SCRIPT_URL + '?' + new URLSearchParams({ action, ...params });
-  const res = await fetch(url, { redirect: 'follow' });
-  if (!res.ok) throw new Error('Server error: ' + res.status);
-  const text = await res.text();
-  try { return JSON.parse(text); } catch { return { success: false, message: 'Bad response', raw: text }; }
+  return withRetry(async () => readJson(await fetch(url, { redirect: 'follow' })));
 }
 
-// כתיבות, וכל קריאה שיש בה מידע אישי או סיסמה (תשובות, טלפון, הגרלה, דשבורד) — POST עם גוף text/plain,
+// כתיבות, וכל קריאה שיש בה מידע אישי או סיסמה (מייל, תשובות, טלפון, הגרלה, דשבורד) — POST עם גוף text/plain,
 // כדי שהמידע לא ייכנס לכתובת ולא יישמר בלוגים ובהיסטוריה.
 // זו "בקשה פשוטה" מבחינת CORS (בלי preflight), ו-Apps Script קורא אותה מ-e.postData.
 async function apiPost(action, payload = {}) {
   if (isLocalMode()) throw new Error('SCRIPT_URL not configured');
-  const res = await fetch(CONFIG.SCRIPT_URL, {
+  return withRetry(async () => readJson(await fetch(CONFIG.SCRIPT_URL, {
     method: 'POST',
     redirect: 'follow',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
     body: JSON.stringify({ action, ...payload }),
-  });
-  if (!res.ok) throw new Error('Server error: ' + res.status);
-  const text = await res.text();
-  try { return JSON.parse(text); } catch { return { success: false, message: 'Bad response', raw: text }; }
+  })));
 }
 
 // ── טוסטים ───────────────────────────────────────────────
