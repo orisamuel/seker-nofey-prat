@@ -20,6 +20,7 @@ for (const ch of S.chapters) {
   if (chIds.has(ch.id)) errors.push('duplicate chapter id ' + ch.id);
   chIds.add(ch.id);
   if (ch.id !== 'about' && !catIds.has(ch.cat)) errors.push('bad cat in ' + ch.id + ': ' + ch.cat);
+  if ('noSkip' in ch && typeof ch.noSkip !== 'boolean') errors.push('noSkip must be true/false ' + ch.id);
   for (const q of ch.questions) {
     qCount++;
     if (qById[q.id]) errors.push('duplicate question id ' + q.id);
@@ -33,6 +34,7 @@ for (const ch of S.chapters) {
     if (q.opts && q.opts.includes('אחר') && q.other) errors.push('both other:true and "אחר" option in ' + q.id);
     if (q.exclusive && !q.opts.includes(q.exclusive)) errors.push('exclusive not in opts ' + q.id);
     if ('required' in q && typeof q.required !== 'boolean') errors.push('required must be true/false ' + q.id);
+    if ('dontKnow' in q && (q.type !== 'scale' || typeof q.dontKnow !== 'boolean')) errors.push('dontKnow only on scales, true/false ' + q.id);
   }
 }
 // הפרטים הדמוגרפיים חובה, השם רשות

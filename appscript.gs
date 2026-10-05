@@ -9,7 +9,7 @@
 //   3. פעם אחת: לפתוח את העורך (clasp open), להריץ את setup() ולאשר הרשאות.
 //      setup יוצר את הטאבים, סיסמת צוות אקראית (מודפסת בלוג ונשמרת בטאב "הגדרות")
 //      וטריגר חימום.
-//   4. setup.html באתר → "סנכרון שאלות לגיליון" (בפעם הראשונה בלי סיסמה).
+//   4. דף הניהול באתר (admin.html) → כניסה בסיסמה → "שמירה". בשרת ריק נטען השאלון ההתחלתי מ-survey-data.js.
 //
 // ⚠️ אחרי כל עריכה של הקובץ הזה: ./deploy.sh "מה השתנה" (גרסה חדשה על אותה כתובת).
 // ============================================================
@@ -36,6 +36,13 @@ const MAX_NEW_EMAILS_PER_HOUR = 400; // הגנה מהצפה של הטאב
 
 // "פרק" מיוחד בטאב הגולמי: העונה לחץ "התחלה מחדש", כל התשובות שלו לא נספרות
 const DISCARD_CH = '_בוטל';
+
+const T_NOTICE = 'קרא אותי';
+const SITE = 'https://sekernofey.online/';
+
+// הסקר הציבורי נשמר במטמון (קריאה ופענוח של הטאבים לוקחים כמה שניות). מתחלף בכל שמירה בדף הניהול
+const SURVEY_CACHE = 'survey_public_v1';
+const SURVEY_CACHE_SECS = 21600; // המקסימום ש-Apps Script מאפשר (6 שעות)
 
 // ============================================================
 // עזרים
@@ -75,6 +82,12 @@ function safeCell(v) {
   return v;
 }
 
+// טקסט מדף הניהול: מה שנראה כמו נוסחה, מספר או תאריך הגיליון היה הופך. גרש בהתחלה שומר אותו כמו שהוא
+function textCell(v) {
+  if (typeof v !== 'string') return v;
+  return /^[=+\-@']/.test(v) || /^[\d\s.,:\/]+$/.test(v) ? "'" + v : v;
+}
+
 // טאב חדש נוצר עם 26 עמודות, וטבלת התוצאות צריכה עמודה לכל שאלה. בלי זה הכתיבה נכשלת.
 function ensureCols(sheet, n) {
   const max = sheet.getMaxColumns();
@@ -93,7 +106,7 @@ function settingsDefaults() {
   return [
     ['surveyOpen', 'כן', 'האם הסקר פתוח למענה (כן/לא)'],
     // מתחילה באותיות: סיסמה שכולה ספרות (או "123e45") הגיליון הופך למספר, ואז היא לא תואמת למה שמקלידים
-    ['dashboardPassword', 'np' + Utilities.getUuid().replace(/-/g, '').slice(0, 8), 'סיסמת הצוות לדשבורד ולסנכרון השאלות. נוצרה אקראית, אפשר להחליף'],
+    ['dashboardPassword', 'np' + Utilities.getUuid().replace(/-/g, '').slice(0, 8), 'סיסמת הצוות לדשבורד ולדף הניהול. נוצרה אקראית, מחליפים בדף הניהול'],
     ['publicReport', 'לא', 'האם הדוח הציבורי פעיל (כן/לא)'],
   ];
 }
@@ -116,11 +129,11 @@ function upsertSetting(sheet, key, value, note) {
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (String(data[i][0]).trim() === key) {
-      sheet.getRange(i + 1, 2).setValue(value);
+      sheet.getRange(i + 1, 2).setValue(textCell(value));
       return;
     }
   }
-  sheet.appendRow([key, value, note || '']);
+  sheet.appendRow([key, textCell(value), note || '']);
 }
 
 function validEmail(e) {
@@ -227,6 +240,8 @@ function setup() {
   ensureSheet(T_RAFFLE, RAFFLE_HEADERS);
   ensureSheet(T_EMAILS, EMAIL_HEADERS);
   emailSecret();
+  writeNoticeSheet();
+  protectTabs();
   const hasWarm = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'keepWarm'; });
   if (!hasWarm) ScriptApp.newTrigger('keepWarm').timeBased().everyMinutes(10).create();
   Logger.log('מוכן. סיסמת הצוות (גם בטאב "הגדרות"): ' + settings.dashboardPassword);
@@ -239,104 +254,214 @@ function keepWarm() { Logger.log('warm ' + new Date().toISOString()); }
 // מבנה הסקר: פרקים + שאלות
 // ============================================================
 
-const CHAPTER_HEADERS = ['id', 'כותרת', 'אייקון', 'תיאור', 'תנאי הצגה', 'שער', 'פעיל', 'סדר', 'קטגוריה', 'פתיח', 'סיום'];
-const QUESTION_HEADERS = ['פרק', 'id', 'סוג', 'שאלה', 'עזרה', 'אפשרויות ( | )', 'אחר', 'בלעדי', 'מינ', 'מקס', 'תווית מינ', 'תווית מקס', 'תנאי הצגה', 'פעיל', 'סדר', 'חובה'];
+const CHAPTER_HEADERS = ['id', 'כותרת', 'אייקון', 'תיאור', 'תנאי הצגה', 'שער', 'פעיל', 'סדר', 'קטגוריה', 'פתיח', 'סיום', 'בלי דילוג'];
+const QUESTION_HEADERS = ['פרק', 'id', 'סוג', 'שאלה', 'עזרה', 'אפשרויות ( | )', 'אחר', 'בלעדי', 'מינ', 'מקס', 'תווית מינ', 'תווית מקס', 'תנאי הצגה', 'פעיל', 'סדר', 'חובה', 'לא יודע'];
 
-// זריעת המבנה מהלקוח (setup.html שולח את survey-data.js המלא).
-// בפעם הראשונה (טאב השאלות ריק) אין צורך בסיסמה; אחר כך חובה, כי הזריעה דורסת עריכות בגיליון.
-function seedSurvey(surveyJson, password) {
-  const qExisting = getSpreadsheet().getSheetByName(T_QUESTIONS);
-  const firstTime = !qExisting || qExisting.getLastRow() <= 1;
-  const settings = getSettings();
-  if (!firstTime && password !== settings.dashboardPassword) {
-    return { success: false, message: 'סיסמה שגויה (הסיסמה נמצאת בטאב "הגדרות" בגיליון)' };
+// תשובת "לא יודע/ת" בסולם: נשמרת כטקסט, ולא נכנסת לממוצעים
+const DONT_KNOW = 'לא יודע/ת';
+
+// ============================================================
+// דף הניהול (admin.html): כל העריכה של השאלון, הטקסטים וההגדרות, בסיסמת הצוות.
+// הטאבים "פרקים" ו"שאלות" הם רק אחסון (וגיבוי קריא). לא עורכים אותם ידנית.
+// ============================================================
+
+function checkPassword(password) {
+  return !!password && String(password) === getSettings().dashboardPassword;
+}
+
+// השאלון המלא, כולל נושאים ושאלות מוסתרים. legacy = עוד לא נשמר מדף הניהול
+function getAdmin(password) {
+  try {
+    if (!checkPassword(password)) return { success: false, message: 'סיסמה שגויה' };
+    const settings = getSettings();
+    return {
+      success: true,
+      survey: loadSurvey(true),
+      rev: settings.surveyRev || '',
+      legacy: !settings.surveyRev,
+      settings: { surveyOpen: settings.surveyOpen !== 'לא', publicReport: settings.publicReport === 'כן' },
+      answered: answeredCounts(),
+    };
+  } catch (e) {
+    return { success: false, message: e.toString() };
   }
-  const survey = parseJsonSafe(surveyJson, null);
-  if (!survey || !survey.chapters) return { success: false, message: 'מבנה סקר לא תקין' };
+}
 
-  const chSheet = ensureSheet(T_CHAPTERS, CHAPTER_HEADERS);
-  const qSheet = ensureSheet(T_QUESTIONS, QUESTION_HEADERS);
-  chSheet.clearContents(); chSheet.appendRow(CHAPTER_HEADERS);
-  qSheet.clearContents(); qSheet.appendRow(QUESTION_HEADERS);
+// כמה ענו על כל שאלה (מהטבלה השטוחה), כדי שבמחיקה יהיה ברור מה יוצא מהתוצאות
+function answeredCounts() {
+  const out = {};
+  const flat = getSpreadsheet().getSheetByName(T_FLAT);
+  if (!flat || flat.getLastRow() <= 1) return out;
+  const data = flat.getDataRange().getValues();
+  for (let j = 2; j < data[0].length; j++) {
+    let n = 0;
+    for (let i = 1; i < data.length; i++) if (data[i][j] !== '' && data[i][j] !== null) n++;
+    if (n) out[String(data[0][j])] = n;
+  }
+  return out;
+}
 
+// rev: הגרסה שהדף טען. אם מישהו אחר שמר בינתיים, לא דורסים (אלא אם force)
+function saveSurvey(password, surveyJson, rev, force) {
+  try {
+    if (!checkPassword(password)) return { success: false, message: 'סיסמה שגויה' };
+    const survey = parseJsonSafe(surveyJson, null);
+    const errors = validateSurvey(survey);
+    if (errors.length) return { success: false, message: 'יש בשאלון דברים לתקן', errors: errors.slice(0, 30) };
+    return withLock(function () {
+      if (!force && (getSettings().surveyRev || '') !== String(rev || '')) {
+        return { success: false, conflict: true, message: 'מישהו אחר שמר שינויים בינתיים' };
+      }
+      writeSurveyTabs(survey);
+      const newRev = 'r' + Utilities.getUuid().replace(/-/g, '').slice(0, 12);
+      upsertSetting(getSpreadsheet().getSheetByName(T_SETTINGS), 'surveyRev', newRev, 'מזהה של השמירה האחרונה בדף הניהול');
+      CacheService.getScriptCache().remove(SURVEY_CACHE);
+      publicSurvey(); // ממלא את המטמון בגרסה החדשה
+      return { success: true, rev: newRev };
+    });
+  } catch (e) {
+    return { success: false, message: e.toString() };
+  }
+}
+
+function saveSettings(password, surveyOpen, publicReport, newPassword) {
+  try {
+    if (!checkPassword(password)) return { success: false, message: 'סיסמה שגויה' };
+    newPassword = newPassword === undefined || newPassword === null ? '' : String(newPassword).trim();
+    if (newPassword && newPassword.length < 8) return { success: false, message: 'סיסמה חדשה: לפחות 8 תווים' };
+    return withLock(function () {
+      const sheet = getSpreadsheet().getSheetByName(T_SETTINGS);
+      if (surveyOpen === true || surveyOpen === false) upsertSetting(sheet, 'surveyOpen', surveyOpen ? 'כן' : 'לא');
+      if (publicReport === true || publicReport === false) upsertSetting(sheet, 'publicReport', publicReport ? 'כן' : 'לא');
+      if (newPassword) upsertSetting(sheet, 'dashboardPassword', newPassword);
+      return { success: true };
+    });
+  } catch (e) {
+    return { success: false, message: e.toString() };
+  }
+}
+
+// בדיקות לפני שמירה. ההודעות מוצגות בדף הניהול כמו שהן
+function validateSurvey(s) {
+  if (!s || typeof s !== 'object' || !Array.isArray(s.chapters)) return ['מבנה שאלון לא תקין'];
+  if (JSON.stringify(s).length > 300000) return ['השאלון ארוך מדי'];
+  if (s.meta !== undefined && (!s.meta || typeof s.meta !== 'object' || JSON.stringify(s.meta).length > 40000)) {
+    return ['הטקסטים הכלליים לא תקינים או ארוכים מדי'];
+  }
+  const errs = [];
+  const chIds = {}, all = {};
+  s.chapters.forEach(function (ch, ci) {
+    const where = '"' + String((ch && ch.title) || ('נושא ' + (ci + 1))) + '"';
+    if (!ch || !/^[a-z0-9_]{1,40}$/.test(String(ch.id || ''))) { errs.push(where + ': מזהה לא תקין'); return; }
+    if (chIds[ch.id]) errs.push(where + ': מזהה כפול');
+    chIds[ch.id] = true;
+    if (!String(ch.title || '').trim()) errs.push('נושא ' + (ci + 1) + ': חסרה כותרת');
+    if (!Array.isArray(ch.questions)) { errs.push(where + ': רשימת השאלות לא תקינה'); return; }
+    ch.questions.forEach(function (q, qi) {
+      const w = where + ', שאלה ' + (qi + 1);
+      if (!q || !/^[a-z0-9_]{1,60}$/.test(String(q.id || ''))) { errs.push(w + ': מזהה לא תקין'); return; }
+      if (all[q.id]) errs.push(w + ': מזהה כפול');
+      all[q.id] = q;
+      if (!TYPE_TO_HE[q.type]) errs.push(w + ': סוג לא מוכר');
+      if (!String(q.text || '').trim()) errs.push(w + ': חסר נוסח');
+      if (q.type === 'radio' || q.type === 'checkbox' || q.type === 'rank') {
+        const o = Array.isArray(q.opts) ? q.opts.map(function (x) { return String(x).trim(); }) : [];
+        if (o.length < 2 || o.some(function (x) { return !x; })) errs.push(w + ': צריך לפחות שתי אפשרויות, בלי אפשרות ריקה');
+        if (o.some(function (x) { return x.indexOf('|') !== -1; })) errs.push(w + ': אי אפשר להשתמש בתו | באפשרות');
+        if (new Set(o).size !== o.length) errs.push(w + ': אותה אפשרות מופיעה פעמיים');
+        if (q.exclusive && o.indexOf(q.exclusive) === -1) errs.push(w + ': האפשרות שמבטלת את השאר לא ברשימה');
+      }
+      if (q.type === 'scale') {
+        const lo = Number(q.min), hi = Number(q.max);
+        if (!(lo >= 0 && hi > lo && hi - lo <= 10)) errs.push(w + ': טווח הסולם לא תקין');
+      }
+    });
+  });
+  // תנאי הצגה: מפנים לשאלה קיימת ולאפשרויות שלה
+  s.chapters.forEach(function (ch) {
+    if (!ch || !Array.isArray(ch.questions)) return;
+    [ch].concat(ch.questions).forEach(function (x) {
+      if (!x || !x.showIf) return;
+      const name = '"' + String(x.title || x.text || '').slice(0, 40) + '"';
+      const t = all[x.showIf.q];
+      const vals = x.showIf.vals || x.showIf.in || x.showIf.any || x.showIf.notIn || [];
+      if (!t) errs.push(name + ': תנאי ההצגה מפנה לשאלה שלא קיימת');
+      else if (!vals.length || vals.some(function (v) { return (t.opts || []).indexOf(v) === -1; })) errs.push(name + ': תנאי ההצגה מפנה לתשובה שלא קיימת');
+    });
+  });
+  return errs;
+}
+
+// השאלון לטאבים "פרקים" ו"שאלות", והטקסטים הכלליים לטאב "הגדרות"
+function writeSurveyTabs(survey) {
   const chRows = [], qRows = [];
   survey.chapters.forEach(function (ch, ci) {
     chRows.push([
       ch.id, ch.title, ch.icon || '', ch.desc || '',
       condToString(ch.showIf),
-      (ch.gate || ch.core) ? 'כן' : '', 'כן', ci + 1, ch.cat || '',
+      (ch.gate || ch.core) ? 'כן' : '', ch.active === false ? 'לא' : 'כן', ci + 1, ch.cat || '',
       ch.intro || '', ch.outro || '',
-    ]);
-    (ch.questions || []).forEach(function (q, qi) {
+      ch.noSkip ? 'כן' : '',
+    ].map(textCell));
+    ch.questions.forEach(function (q, qi) {
       qRows.push([
         ch.id, q.id, TYPE_TO_HE[q.type] || q.type, q.text, q.help || '',
         (q.opts || []).join(' | '),
         q.other ? 'כן' : '', q.exclusive || '',
-        q.min !== undefined ? q.min : '', q.max !== undefined ? q.max : '',
+        q.min !== undefined && q.min !== '' ? Number(q.min) : '', q.max !== undefined && q.max !== '' ? Number(q.max) : '',
         q.minLabel || '', q.maxLabel || '',
         condToString(q.showIf),
-        'כן', qi + 1,
+        q.active === false ? 'לא' : 'כן', qi + 1,
         q.required ? 'כן' : '',
-      ]);
+        q.dontKnow ? 'כן' : '',
+      ].map(textCell));
     });
   });
+  const chSheet = ensureSheet(T_CHAPTERS, CHAPTER_HEADERS);
+  const qSheet = ensureSheet(T_QUESTIONS, QUESTION_HEADERS);
+  chSheet.clearContents(); chSheet.appendRow(CHAPTER_HEADERS);
+  qSheet.clearContents(); qSheet.appendRow(QUESTION_HEADERS);
   if (chRows.length) chSheet.getRange(2, 1, chRows.length, CHAPTER_HEADERS.length).setValues(chRows);
   if (qRows.length) qSheet.getRange(2, 1, qRows.length, QUESTION_HEADERS.length).setValues(qRows);
 
-  // שמירת המטא (כותרות, פתיח, הגרלה) בהגדרות
-  const sSheet = ensureSheet(T_SETTINGS, ['מפתח', 'ערך', 'הסבר']);
-  upsertSetting(sSheet, 'meta', JSON.stringify(survey.meta || {}), 'מטא של הסקר (כותרת, פתיח, הגרלה) — JSON');
-
-  // הכנת שאר הטאבים + כותרות הטבלה השטוחה
+  upsertSetting(ensureSheet(T_SETTINGS, ['מפתח', 'ערך', 'הסבר']), 'meta', JSON.stringify(survey.meta || {}), 'הטקסטים הכלליים של הסקר (נערכים בדף הניהול)');
   ensureSheet(T_RAW, RAW_HEADERS);
   ensureSheet(T_RAFFLE, RAFFLE_HEADERS);
   ensureSheet(T_EMAILS, EMAIL_HEADERS);
-  writeGuideSheet();
+  writeNoticeSheet();
+  protectTabs();
   rebuildFlatHeaders();
-
-  return { success: true, message: 'נטענו ' + chRows.length + ' פרקים ו-' + qRows.length + ' שאלות' };
 }
 
-// טאב "מדריך עריכה" — הוראות לצוות, נכתב מחדש בכל סנכרון
-function writeGuideSheet() {
+// במקום מדריך עריכה: הגיליון הוא מסד הנתונים, ועורכים רק בדף הניהול
+function writeNoticeSheet() {
   const ss = getSpreadsheet();
-  let sheet = ss.getSheetByName('מדריך עריכה');
-  if (!sheet) sheet = ss.insertSheet('מדריך עריכה');
+  const old = ss.getSheetByName('מדריך עריכה');
+  if (old) ss.deleteSheet(old);
+  const sheet = ss.getSheetByName(T_NOTICE) || ss.insertSheet(T_NOTICE);
   sheet.clearContents();
-  const rows = [
-    ['📝 איך עורכים את הסקר? (השינויים מופיעים באתר בטעינה הבאה, בלי פריסה מחדש)'],
-    [''],
-    ['עריכת נוסח', 'פשוט עורכים את התא בעמודה "שאלה" בטאב "שאלות". אותו דבר לגבי אפשרויות, עזרה ותוויות.'],
-    ['הוספת שאלה', 'מוסיפים שורה בטאב "שאלות": פרק קיים, id חדש באנגלית (למשל post_x1), סוג ונוסח. עמודת "סדר" קובעת את המיקום בפרק.'],
-    ['השבתת שאלה/פרק', 'עמודת "פעיל" = לא. השאלה נעלמת מהאתר, והתשובות שכבר נאספו נשמרות.'],
-    ['⚠️ חשוב', 'לא לשנות id של שאלה קיימת. התוצאות נשמרות לפי ה-id.'],
-    [''],
-    ['סוגי שאלות', 'סולם · בחירה אחת · בחירה מרובה · טקסט קצר · טקסט ארוך · מספר · דירוג'],
-    ['אפשרויות', 'מפרידים בקו אנכי | . עמודת "אחר" = כן מוסיפה אפשרות "אחר" עם שדה חופשי.'],
-    ['סולם', 'עמודות מינ/מקס קובעות את הטווח (למשל 1 ו-10, או 1 ו-7) + תווית מינ/תווית מקס לטקסט בקצוות.'],
-    ['בחירה מרובה', 'מקס = מספר הבחירות המרבי (למשל 3 בשאלת "בחר 3 נושאים"). ריק = בלי הגבלה.'],
-    ['בלעדי', 'בבחירה מרובה: אפשרות שמבטלת את כל השאר (למשל "אין ילדים בבית").'],
-    ['חובה', 'כן = אי אפשר להמשיך בלי לענות (כך מסומנים הפרטים הדמוגרפיים ב"קצת עליך"). ריק = רשות.'],
-    [''],
-    ['תנאי הצגה', 'מציג שאלה/פרק רק לפי תשובה קודמת. תחביר: id = ערך  (או כמה ערכים עם | )'],
-    ['דוגמה 1', 'syn_teacher = מישהו מהיישוב   ← מוצג רק למי שבחר באפשרות הזו'],
-    ['דוגמה 2', 'about_gender != גבר   ← מוצג לכולם חוץ ממי שענה "גבר"'],
-    ['דוגמה 3', 'about_kids = נוער (ז׳–י״ב) | יסודי (א׳–ו׳)  ← מוצג אם סומן אחד מאלה'],
-    [''],
-    ['פתיח / סיום (טאב "פרקים")', 'טקסט שמוצג בראש הפרק / בסופו, למשל המילים של ועדת התרבות. ריק = בלי.'],
-    ['קטגוריות (עמודה בטאב "פרקים")', 'gov=ניהול · infra=תשתיות · space=מרחב ציבורי · edu=חינוך · comm=קהילה · cult=תרבות'],
-    [''],
-    ['הגדרות (טאב "הגדרות")', 'surveyOpen=לא סוגר את הסקר · publicReport=כן מפרסם את הדוח הציבורי · dashboardPassword: סיסמת הצוות'],
-    ['תוצאות', 'טאב "תוצאות": שורה לכל עונה, עמודה לכל שאלה. טאב "תשובות גולמי": גיבוי מלא, לא לערוך.'],
-    ['מיילים', 'טאב "מיילים": קוד מוצפן לכל כתובת (לא הכתובת עצמה), כדי שכל אחד ימלא פעם אחת וימשיך מכל מכשיר. לא לערוך.'],
-  ];
-  sheet.getRange(1, 1, rows.length, 2).setValues(rows.map(function (r) { return [r[0] || '', r[1] || '']; }));
-  sheet.setColumnWidth(1, 220);
-  sheet.setColumnWidth(2, 700);
+  sheet.getRange(1, 1, 3, 1).setValues([
+    ['הגיליון הזה הוא מסד הנתונים של הסקר. לא עורכים בו.'],
+    ['שאלות, טקסטים והגדרות: בדף הניהול, ' + SITE + 'admin.html'],
+    ['תוצאות: בדשבורד, ' + SITE + 'dashboard.html'],
+  ]);
+  sheet.setColumnWidth(1, 700);
+}
+
+// עריכה ידנית בגיליון עוקפת את דף הניהול ואת המטמון. מי שמנסה מקבל אזהרה (לא חסימה)
+function protectTabs() {
+  const ss = getSpreadsheet();
+  [T_CHAPTERS, T_QUESTIONS, T_SETTINGS, T_RAW, T_FLAT, T_EMAILS].forEach(function (name) {
+    const sh = ss.getSheetByName(name);
+    if (sh && !sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) {
+      sh.protect().setDescription('נערך מדף הניהול באתר').setWarningOnly(true);
+    }
+  });
 }
 
 // קריאת מבנה הסקר מהגיליון
-function loadSurvey() {
+// includeInactive: גם נושאים ושאלות מוסתרים (active: false), לדף הניהול
+function loadSurvey(includeInactive) {
   const chSheet = getSpreadsheet().getSheetByName(T_CHAPTERS);
   const qSheet = getSpreadsheet().getSheetByName(T_QUESTIONS);
   if (!chSheet || !qSheet || chSheet.getLastRow() <= 1) return null;
@@ -351,8 +476,10 @@ function loadSurvey() {
   for (let i = 1; i < qData.length; i++) {
     const r = qData[i];
     if (!String(r[1]).trim()) continue;            // שורה ריקה
-    if (String(r[13]).trim() === 'לא') continue;   // לא פעיל
+    const qOff = String(r[13]).trim() === 'לא';   // לא פעיל
+    if (qOff && !includeInactive) continue;
     const q = { id: String(r[1]).trim(), type: normalizeType(r[2]), text: String(r[3]), order: Number(r[14]) || i };
+    if (qOff) q.active = false;
     if (r[4]) q.help = String(r[4]);
     if (r[5]) q.opts = String(r[5]).split('|').map(function (s) { return s.trim(); }).filter(String);
     if (String(r[6]).trim() === 'כן') q.other = true;
@@ -364,6 +491,7 @@ function loadSurvey() {
     const cond = parseCondition(String(r[12]));
     if (cond) q.showIf = cond;
     if (hasRequired) q.required = String(r[15]).trim() === 'כן';
+    if (String(r[16] || '').trim() === 'כן') q.dontKnow = true;
     const chId = String(r[0]).trim();
     (byChapter[chId] = byChapter[chId] || []).push(q);
   }
@@ -378,8 +506,10 @@ function loadSurvey() {
   for (let i = 1; i < chData.length; i++) {
     const r = chData[i];
     if (!String(r[0]).trim()) continue;
-    if (String(r[6]).trim() === 'לא') continue; // לא פעיל
+    const chOff = String(r[6]).trim() === 'לא'; // לא פעיל
+    if (chOff && !includeInactive) continue;
     const ch = { id: String(r[0]).trim(), title: String(r[1]), questions: byChapter[String(r[0]).trim()] || [], order: Number(r[7]) || i };
+    if (chOff) ch.active = false;
     if (r[2]) ch.icon = String(r[2]);
     if (r[3]) ch.desc = String(r[3]);
     const cond = parseCondition(String(r[4]));
@@ -388,6 +518,7 @@ function loadSurvey() {
     if (r.length > 8 && r[8]) ch.cat = String(r[8]).trim();
     if (r.length > 9 && r[9]) ch.intro = String(r[9]);
     if (r.length > 10 && r[10]) ch.outro = String(r[10]);
+    if (String(r[11] || '').trim() === 'כן') ch.noSkip = true;
     chapters.push(ch);
   }
   chapters.sort(function (a, b) { return a.order - b.order; });
@@ -395,13 +526,26 @@ function loadSurvey() {
   return { meta: meta, chapters: chapters };
 }
 
+// הסקר הציבורי (בלי מוסתרים), מהמטמון כשאפשר
+function publicSurvey() {
+  const cache = CacheService.getScriptCache();
+  const hit = parseJsonSafe(cache.get(SURVEY_CACHE), null);
+  if (hit) return hit;
+  const survey = loadSurvey(false);
+  if (survey) {
+    try { cache.put(SURVEY_CACHE, JSON.stringify(survey), SURVEY_CACHE_SECS); } catch (e) { /* גדול מדי למטמון: קוראים מהגיליון */ }
+  }
+  return survey;
+}
+
+// legacy: השאלון עוד לא נשמר מדף הניהול, ואז האתר לוקח את הטקסטים הכלליים ואת "קצת עליך" מהקוד
 function getSurvey() {
   try {
     const settings = getSettings();
     const open = settings.surveyOpen !== 'לא';
-    const survey = loadSurvey();
-    if (!survey) return { success: false, open: open, message: 'הסקר טרם נטען לגיליון. הריצו סנכרון מ-setup.html' };
-    return { success: true, survey: survey, open: open };
+    const survey = publicSurvey();
+    if (!survey) return { success: false, open: open, message: 'השאלון עוד לא נשמר. נכנסים לדף הניהול ושומרים' };
+    return { success: true, survey: survey, open: open, legacy: !settings.surveyRev };
   } catch (e) {
     return { success: false, message: e.toString() };
   }
@@ -413,7 +557,7 @@ function getSurvey() {
 
 // הטבלה השטוחה: עמודה לכל שאלה, שורה לכל עונה — נוחה לניתוח בגיליון
 function rebuildFlatHeaders() {
-  const survey = loadSurvey();
+  const survey = loadSurvey(true); // גם לשאלות מוסתרות יש עמודה
   if (!survey) return;
   const flat = ensureSheet(T_FLAT, ['קוד עונה', 'עדכון אחרון']);
   const headers = ['קוד עונה', 'עדכון אחרון'];
@@ -617,7 +761,7 @@ function identify(email, rid) {
 }
 
 function profileKeysForLogic() {
-  const survey = loadSurvey();
+  const survey = publicSurvey();
   const keys = {};
   (survey ? survey.chapters : []).forEach(function (ch) {
     [ch].concat(ch.questions).forEach(function (x) {
@@ -645,7 +789,7 @@ function enterRaffle(rid, name, phone) {
     const submitted = res.chapters;
     const profile = (submitted.about && submitted.about.answers) || {};
 
-    const survey = loadSurvey();
+    const survey = publicSurvey();
     if (survey) {
       const required = survey.chapters.filter(function (ch) { return evalCond(ch.showIf, profile); });
       const missing = required.filter(function (ch) { return !submitted[ch.id]; });
@@ -701,7 +845,7 @@ function getResults(password) {
     }
     const raffle = getSpreadsheet().getSheetByName(T_RAFFLE);
     const raffleCount = raffle ? Math.max(0, raffle.getLastRow() - 1) : 0;
-    return { success: true, rows: rows, raffleCount: raffleCount, survey: loadSurvey() };
+    return { success: true, rows: rows, raffleCount: raffleCount, survey: publicSurvey() };
   } catch (e) {
     return { success: false, message: e.toString() };
   }
@@ -713,7 +857,7 @@ function getPublicReport() {
     const settings = getSettings();
     if (settings.publicReport !== 'כן') return { success: false, message: 'הדוח הציבורי עדיין לא פורסם' };
 
-    const survey = loadSurvey();
+    const survey = publicSurvey();
     const raw = getSpreadsheet().getSheetByName(T_RAW);
     if (!survey || !raw || raw.getLastRow() <= 1) return { success: false, message: 'אין עדיין נתונים' };
 
@@ -743,7 +887,8 @@ function getPublicReport() {
         const qOut = { id: q.id, text: q.text, type: q.type, count: vals.length };
         if (q.type === 'scale' || q.type === 'number') {
           const nums = vals.map(Number).filter(function (n) { return !isNaN(n); });
-          qOut.avg = Math.round((nums.reduce(function (a, b) { return a + b; }, 0) / nums.length) * 10) / 10;
+          if (vals.length > nums.length) qOut.dontKnow = vals.length - nums.length;
+          if (nums.length) qOut.avg = Math.round((nums.reduce(function (a, b) { return a + b; }, 0) / nums.length) * 10) / 10;
           if (q.type === 'scale') {
             qOut.min = q.min || 1; qOut.max = q.max || 10;
             qOut.minLabel = q.minLabel || ''; qOut.maxLabel = q.maxLabel || '';
@@ -804,7 +949,7 @@ function route(e, body) {
 
     switch (action) {
       case 'ping':
-        return jsonResponse({ success: true, version: 'v3' });
+        return jsonResponse({ success: true, version: 'v4' });
 
       case 'getSurvey':
         return jsonResponse(getSurvey());
@@ -827,8 +972,14 @@ function route(e, body) {
       case 'getPublicReport':
         return jsonResponse(getPublicReport());
 
-      case 'seedSurvey':
-        return jsonResponse(seedSurvey(typeof p.survey === 'string' ? p.survey : JSON.stringify(p.survey || {}), p.password));
+      case 'getAdmin':
+        return jsonResponse(getAdmin(p.password));
+
+      case 'saveSurvey':
+        return jsonResponse(saveSurvey(p.password, typeof p.survey === 'string' ? p.survey : JSON.stringify(p.survey || null), p.rev, p.force === true));
+
+      case 'saveSettings':
+        return jsonResponse(saveSettings(p.password, p.surveyOpen, p.publicReport, p.newPassword));
 
       default:
         return jsonResponse({ success: false, message: 'Unknown action: ' + action });

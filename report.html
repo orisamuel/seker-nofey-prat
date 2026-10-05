@@ -73,16 +73,17 @@ function render(report) {
       if (q.type === 'scale') {
         const lo = q.min || 1, hi = q.max || 10;
         const norm = hi > lo ? (q.avg - lo) / (hi - lo) : 0; // צבע לפי מיקום בטווח, גם בסולם 1–7
-        qWrap.append(el('div', {},
+        if (q.avg !== undefined) qWrap.append(el('div', {},
           el('span', { class: 'avg-chip ' + (norm >= 6 / 9 ? 'avg-good' : norm >= 4 / 9 ? 'avg-mid' : 'avg-low') }, q.avg.toFixed(1)),
           el('span', { class: 'small muted' }, ' ממוצע (' + lo + '–' + hi + ')')));
-        if (q.hist) {
+        if (q.dontKnow) qWrap.append(el('p', { class: 'small muted' }, DONT_KNOW + ': ' + q.dontKnow));
+        if (q.hist && Object.keys(q.hist).length) {
           const maxH = Math.max(...Object.values(q.hist));
           const histWrap = el('div', { style: 'display:flex; gap:3px; align-items:flex-end; height:54px; margin-top:8px' });
           for (let v = lo; v <= hi; v++) {
             const n = q.hist[v] || 0;
             histWrap.append(el('div', { style: 'flex:1; text-align:center' },
-              el('div', { style: 'background:var(--primary); opacity:' + (n ? '.85' : '.15') + '; border-radius:3px 3px 0 0; height:' + (n ? Math.max(6, (n / maxH) * 46) : 2) + 'px', title: String(n) }),
+              el('div', { style: 'background:var(--teal); opacity:' + (n ? '.85' : '.15') + '; border-radius:3px 3px 0 0; height:' + (n ? Math.max(6, (n / maxH) * 46) : 2) + 'px', title: String(n) }),
               el('div', { class: 'muted', style: 'font-size:.62rem' }, String(v))));
           }
           qWrap.append(histWrap,

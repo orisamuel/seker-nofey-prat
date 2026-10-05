@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ניהול הסקר · נופי פרת</title>
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#F6F1E7">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3CclipPath id='c'%3E%3Ccircle cx='14' cy='14' r='14'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='28' height='28' fill='%230E6B5B'/%3E%3Ccircle cx='18.5' cy='9.5' r='4' fill='%23E2A73E'/%3E%3Cpath d='M0 19c5-4 9-3.5 14-1.5s9 1 14-1V28H0z' fill='%23E8D9BC'/%3E%3Cpath d='M0 23c6-3 12-2 17-.5S24 23 28 22v6H0z' fill='%23BF5533'/%3E%3C/g%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Karantina:wght@700&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="config.js"></script>
+  <script src="utils.js"></script>
+  <script src="icons.js"></script>
+  <script src="survey-data.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-in">
+    <span class="brand">ניהול הסקר</span>
+    <div class="spacer"></div>
+    <a class="topbar-btn" href="dashboard.html">דשבורד</a>
+    <a class="topbar-btn" href="./" target="_blank" rel="noopener">לסקר</a>
+  </div>
+</header>
+
+<main class="wrap" id="app"></main>
+
+<script>
+/* ============================================================
+   דף הניהול: כל העריכה של הסקר (נושאים, שאלות, טקסטים, הגדרות), בסיסמת הצוות.
+   עובדים על עותק מקומי, ו"שמירה" שולחת את כל השאלון לשרת (saveSurvey).
+   הטאבים בגיליון הם רק אחסון. לא עורכים שם.
+   ============================================================ */
+
+const PW_KEY = 'np_dash_pw'; // אותה סיסמה ואותה כניסה כמו בדשבורד
+const TYPES = [['scale', 'סולם'], ['radio', 'בחירה אחת'], ['checkbox', 'בחירה מרובה'], ['text', 'טקסט קצר'], ['textarea', 'טקסט ארוך'], ['number', 'מספר']];
+const TYPE_NAME = Object.fromEntries(TYPES.concat([['rank', 'דירוג']]));
+const UI_ICONS = ['arrow-left', 'arrow-right', 'chevron-left', 'chevron-up', 'chevron-down', 'x', 'plus', 'trash-2', 'rotate-ccw'];
+
+const A = {
+  pw: '',
+  survey: null,   // עותק העבודה: { meta, chapters }, כולל נושאים ושאלות מוסתרים
+  saved: '',      // מה ששמור בשרת (JSON), כדי לדעת אם יש שינויים
+  rev: '',        // הגרסה שנטענה. אם מישהו אחר שמר בינתיים, השרת לא דורס
+  legacy: false,  // השאלון עוד לא נשמר מכאן אף פעם
+  settings: {},
+  answered: {},   // כמה ענו על כל שאלה
+  tab: 'topics',
+  chId: null,     // הנושא שפתוח לעריכה
+  open: {},       // שאלות פתוחות לעריכה
+};
+
+const clone = (o) => JSON.parse(JSON.stringify(o));
+
+init();
+
+function init() {
+  window.addEventListener('beforeunload', (e) => { if (isDirty()) { e.preventDefault(); e.returnValue = ''; } });
+  const pw = sessionStorage.getItem(PW_KEY);
+  if (pw) load(pw); else renderLogin();
+}
+
+function show(node) {
+  document.getElementById('app').replaceChildren(node);
+}
+
+// ── כניסה וטעינה ─────────────────────────────────────────
+
+function renderLogin(err) {
+  if (isLocalMode()) {
+    return show(el('div', { class: 'card login-card' }, el('h2', { class: 'mb' }, 'ניהול הסקר'), el('p', {}, 'האתר עוד לא מחובר לשרת (config.js).')));
+  }
+  const pwIn = el('input', { class: 'txt-input', type: 'password', placeholder: 'סיסמת הצוות', 'aria-label': 'סיסמת הצוות', autocomplete: 'current-password' });
+  const go = () => { if (pwIn.value.trim()) load(pwIn.value.trim()); };
+  pwIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
+  show(el('div', { class: 'card login-card' },
+    el('h2', { class: 'mb' }, 'ניהול הסקר'),
+    err ? el('p', { class: 'small err' }, err) : null,
+    pwIn,
+    el('p', { class: 'adm-hint' }, 'אותה סיסמה של הדשבורד.'),
+    el('button', { class: 'btn btn-primary btn-block mt', onclick: go }, 'כניסה')));
+  pwIn.focus();
+}
+
+async function load(pw) {
+  show(el('div', { class: 'center', style: 'padding:80px 0' }, el('div', { class: 'spinner' }), el('p', { class: 'muted' }, 'טוען…')));
+  try {
+    const res = await apiPost('getAdmin', { password: pw });
+    if (!res.success) { sessionStorage.removeItem(PW_KEY); return renderLogin(res.message); }
+    sessionStorage.setItem(PW_KEY, pw);
+    A.pw = pw;
+    A.rev = res.rev || '';
+    A.settings = res.settings || {};
+    A.answered = res.answered || {};
+    // שרת ריק, או שעוד לא נשמר מכאן: מתחילים מהשאלון שבקוד (זה מה שהאתר מציג עכשיו)
+    A.legacy = !!res.legacy || !res.survey;
+    A.survey = clone(mergeSurvey(res.survey, window.SURVEY_DATA, A.legacy));
+    A.saved = A.legacy ? '' : JSON.stringify(A.survey);
+    render();
+  } catch (e) {
+    show(el('div', { class: 'card center' },
+      el('p', { class: 'err' }, 'הטעינה נכשלה. בדקו את החיבור.'),
+      el('button', { class: 'btn btn-ghost mt', onclick: () => load(pw) }, 'נסו שוב')));
+  }
+}
+
+// ── מצב ושמירה ───────────────────────────────────────────
+
+function isDirty() {
+  return !!A.survey && JSON.stringify(A.survey) !== A.saved;
+}
+
+function markDirty() {
+  let bar = document.getElementById('saveBar');
+  if (!bar) {
+    bar = el('div', { class: 'save-bar', id: 'saveBar' },
+      el('div', { class: 'save-bar-in' },
+        el('span', { class: 'sb-msg', id: 'sbMsg' }),
+        el('button', { class: 'btn btn-ghost btn-sm', id: 'revertBtn', onclick: revert }, 'ביטול'),
+        el('button', { class: 'btn btn-primary btn-sm', id: 'saveBtn', onclick: () => save(false) }, 'שמירה')));
+    document.body.append(bar);
+  }
+  const dirty = isDirty();
+  bar.hidden = !dirty;
+  document.body.classList.toggle('has-save-bar', dirty);
+  document.getElementById('sbMsg').textContent = A.legacy ? 'עוד לא נשמר מכאן' : 'יש שינויים שלא נשמרו';
+  document.getElementById('revertBtn').hidden = A.legacy;
+}
+
+function rerender() {
+  const y = window.scrollY;
+  render();
+  window.scrollTo(0, y);
+}
+
+// ניקוי לפני שמירה: רווחים מיותרים ושדות ריקים
+function tidy(s) {
+  const trim = (o, keys) => keys.forEach(k => {
+    if (typeof o[k] !== 'string') return;
+    o[k] = o[k].trim();
+    if (!o[k] && !['title', 'text'].includes(k)) delete o[k];
+  });
+  s.chapters.forEach(ch => {
+    trim(ch, ['title', 'desc', 'intro', 'outro']);
+    ch.questions.forEach(q => {
+      trim(q, ['text', 'help', 'minLabel', 'maxLabel', 'exclusive']);
+      if (q.opts) q.opts = q.opts.map(o => String(o).trim());
+    });
+  });
+}
+
+async function save(force) {
+  const b = document.getElementById('saveBtn');
+  tidy(A.survey);
+  b.disabled = true;
+  b.textContent = 'שומר…';
+  try {
+    const res = await apiPost('saveSurvey', { password: A.pw, survey: A.survey, rev: A.rev, force: !!force });
+    if (res.conflict) return showConflict();
+    if (!res.success) {
+      if (res.errors && res.errors.length) showErrors(res.errors);
+      else showToast(res.message || 'השמירה נכשלה, נסו שוב', 'error');
+      return;
+    }
+    A.rev = res.rev;
+    A.legacy = false;
+    A.saved = JSON.stringify(A.survey);
+    showToast('נשמר. השינויים כבר באתר', 'success');
+    rerender();
+  } catch (e) {
+    showToast('השמירה נכשלה. בדקו את החיבור ונסו שוב', 'error');
+  } finally {
+    b.disabled = false;
+    b.textContent = 'שמירה';
+  }
+}
+
+function revert() {
+  confirmModal('לבטל את השינויים?', 'חוזרים למה שנשמר לאחרונה.', 'ביטול השינויים', () => {
+    A.survey = JSON.parse(A.saved);
+    A.open = {};
+    if (A.chId && !A.survey.chapters.some(c => c.id === A.chId)) A.chId = null;
+    rerender();
+  });
+}
+
+function showConflict() {
+  openModal(el('div', { class: 'modal' },
+    el('h3', {}, 'מישהו אחר שמר בינתיים'),
+    el('p', {}, 'אפשר לטעון את הגרסה שלו (השינויים כאן יימחקו), או לשמור את שלך במקומה.'),
+    el('div', { class: 'modal-actions' },
+      el('button', { class: 'btn btn-primary', onclick: () => { closeModal(); save(true); } }, 'לשמור את שלי'),
+      el('button', { class: 'btn btn-ghost', onclick: () => { closeModal(); A.saved = JSON.stringify(A.survey); load(A.pw); } }, 'לטעון את שלו'))));
+}
+
+function showErrors(errors) {
+  openModal(el('div', { class: 'modal' },
+    el('h3', {}, 'צריך לתקן לפני שמירה'),
+    el('ul', { class: 'err-list' }, ...errors.map(e => el('li', {}, e))),
+    el('div', { class: 'modal-actions' }, el('button', { class: 'btn btn-primary', onclick: closeModal }, 'הבנתי'))));
+}
+
+// ── מסגרת ────────────────────────────────────────────────
+
+function render() {
+  const tabs = el('div', { class: 'seg', role: 'tablist' },
+    ...[['topics', 'נושאים ושאלות'], ['texts', 'טקסטים'], ['settings', 'הגדרות']].map(([id, t]) =>
+      el('button', {
+        class: 'seg-btn' + (A.tab === id ? ' sel' : ''), role: 'tab', 'aria-selected': A.tab === id ? 'true' : 'false',
+        onclick: () => { A.tab = id; A.chId = null; render(); window.scrollTo(0, 0); },
+      }, t)));
+  const body = A.tab === 'texts' ? renderTexts() : A.tab === 'settings' ? renderSettings() : A.chId ? renderChapter() : renderTopics();
+  show(el('div', {},
+    tabs,
+    A.legacy ? el('p', { class: 'adm-banner' }, 'שמירה ראשונה מכאן מעדכנת את השאלון בשרת.') : null,
+    body));
+  markDirty();
+}
+
+// ── נושאים ───────────────────────────────────────────────
+
+function renderTopics() {
+  const s = A.survey;
+  const wrap = el('div', {});
+  const about = s.chapters.find(c => c.id === 'about');
+  if (about) wrap.append(el('div', { class: 'hue-green' }, groupHead('פתיחה'), chapterRow(about, false)));
+  s.meta.categories.forEach(cat => {
+    const chs = s.chapters.filter(c => c.id !== 'about' && c.cat === cat.id);
+    wrap.append(el('div', { class: 'hue-' + cat.hue }, groupHead(cat.title), ...chs.map(ch => chapterRow(ch, true))));
+  });
+  const lost = s.chapters.filter(c => c.id !== 'about' && !s.meta.categories.some(k => k.id === c.cat));
+  if (lost.length) wrap.append(el('div', {}, groupHead('בלי תחום'), ...lost.map(ch => chapterRow(ch, false))));
+  wrap.append(el('button', { class: 'btn btn-ghost btn-block mt', onclick: addChapter }, icon('plus'), 'נושא חדש'));
+  return wrap;
+}
+
+function groupHead(title) {
+  return el('p', { class: 'adm-group' }, el('i', { 'aria-hidden': 'true' }), title);
+}
+
+function chapterRow(ch, movable) {
+  const n = ch.questions.filter(q => q.active !== false).length;
+  const meta = [n === 1 ? 'שאלה אחת' : n + ' שאלות'];
+  if (ch.showIf) meta.push('לחלק מהעונים');
+  if (ch.active === false) meta.push('מוסתר');
+  return el('div', { class: 'adm-row' + (ch.active === false ? ' off' : '') },
+    el('button', { class: 'adm-row-main', onclick: () => openChapter(ch.id) },
+      el('span', { class: 'adm-ic' }, icon(ch.icon || 'list-checks')),
+      el('span', { class: 'adm-row-body' },
+        el('span', { class: 'adm-row-title' }, ch.title || 'בלי כותרת'),
+        el('span', { class: 'adm-row-meta' }, meta.join(' · '))),
+      el('span', { class: 'adm-go', 'aria-hidden': 'true' }, icon('chevron-left'))),
+    movable ? reorder(() => moveChapter(ch, -1), () => moveChapter(ch, 1), !neighbor(ch, -1), !neighbor(ch, 1)) : null);
+}
+
+function openChapter(id) {
+  A.chId = id;
+  A.open = {};
+  render();
+  window.scrollTo(0, 0);
+}
+
+// הסדר בתוך התחום הוא הסדר בסקר (התחומים עצמם בסדר קבוע)
+function neighbor(ch, d) {
+  const same = A.survey.chapters.filter(c => c.id !== 'about' && c.cat === ch.cat);
+  return same[same.indexOf(ch) + d] || null;
+}
+
+function moveChapter(ch, d) {
+  const other = neighbor(ch, d);
+  if (!other) return;
+  const arr = A.survey.chapters, i = arr.indexOf(ch), j = arr.indexOf(other);
+  [arr[i], arr[j]] = [arr[j], arr[i]];
+  markDirty();
+  rerender();
+}
+
+function addChapter() {
+  const id = uniqueId('topic');
+  A.survey.chapters.push({ id, cat: A.survey.meta.categories[0].id, title: 'נושא חדש', icon: 'list-checks', questions: [newQuestion(id)] });
+  markDirty();
+  openChapter(id);
+  A.open[A.survey.chapters[A.survey.chapters.length - 1].questions[0].id] = true;
+  render();
+}
+
+function deleteChapter(ch) {
+  const n = ch.questions.reduce((a, q) => a + (A.answered[q.id] || 0), 0);
+  const deps = ch.questions.flatMap(q => dependents(q.id)).filter(x => x !== ch && !ch.questions.includes(x));
+  const text = [
+    n ? 'יש בו ' + n + ' תשובות. הן נשארות בגיבוי, אבל לא יופיעו בדשבורד. אפשר במקום זה להסתיר אותו.' : '',
+    deps.length ? 'תנאי ההצגה שתלויים בשאלות שלו יוסרו (' + deps.length + ').' : '',
+  ].filter(Boolean).join(' ');
+  confirmModal('למחוק את "' + (ch.title || 'הנושא') + '"?', text || null, 'מחיקה', () => {
+    deps.forEach(x => delete x.showIf);
+    A.survey.chapters.splice(A.survey.chapters.indexOf(ch), 1);
+    A.chId = null;
+    markDirty();
+    render();
+    window.scrollTo(0, 0);
+  });
+}
+
+// ── עריכת נושא ───────────────────────────────────────────
+
+function renderChapter() {
+  const ch = A.survey.chapters.find(c => c.id === A.chId);
+  if (!ch) { A.chId = null; return renderTopics(); }
+  const about = ch.id === 'about';
+  const cat = A.survey.meta.categories.find(c => c.id === ch.cat);
+  const wrap = el('div', { class: cat ? 'hue-' + cat.hue : 'hue-green' });
+
+  wrap.append(el('button', { class: 'link-btn back-link', onclick: () => { A.chId = null; render(); window.scrollTo(0, 0); } }, icon('arrow-right'), 'כל הנושאים'));
+  wrap.append(el('div', { class: 'card' },
+    field('כותרת', textInput(ch, 'title', { keepEmpty: true })),
+    field('תיאור קצר', textInput(ch, 'desc'), 'מתחת לכותרת. רשות'),
+    about ? null : field('תחום', selectInput(A.survey.meta.categories.map(c => [c.id, c.title]), ch.cat, (v) => { ch.cat = v; markDirty(); rerender(); })),
+    field('אייקון', iconPicker(ch), null, true),
+    about ? null : toggle('מוצג בסקר', ch.active !== false, (v) => { setActive(ch, v); rerender(); }),
+    about ? null : toggle('אפשר לסמן "הנושא לא רלוונטי אליי"', !ch.noSkip, (v) => setBool(ch, 'noSkip', !v)),
+    about ? null : field('מוצג רק ל...', condEditor(ch, aboutChoices()), null, true),
+    field('פתיח', textArea(ch, 'intro'), 'בראש הנושא. רשות'),
+    field('סיום', textArea(ch, 'outro'), 'בסוף הנושא. רשות')));
+
+  wrap.append(el('h3', { class: 'adm-h2' }, 'שאלות'));
+  ch.questions.forEach((q, i) => wrap.append(questionCard(ch, q, i)));
+  wrap.append(el('button', { class: 'btn btn-ghost btn-block', onclick: () => addQuestion(ch) }, icon('plus'), 'שאלה חדשה'));
+  if (!MORE_SKIP.includes(ch.id)) wrap.append(el('p', { class: 'adm-hint center mt' }, 'בסוף הנושא מופיעה גם "משהו שהיית רוצה להוסיף?"'));
+  if (!about) wrap.append(el('p', { class: 'center mt' }, el('button', { class: 'link-btn danger', onclick: () => deleteChapter(ch) }, icon('trash-2'), ' מחיקת הנושא')));
+  return wrap;
+}
+
+function iconPicker(ch) {
+  const cur = el('span', { class: 'icon-cur' }, icon(ch.icon || 'list-checks'));
+  const grid = el('div', { class: 'icon-grid' });
+  Object.keys(ICONS).filter(n => !UI_ICONS.includes(n)).sort().forEach(n => {
+    grid.append(el('button', {
+      type: 'button', class: 'icon-pick' + (ch.icon === n ? ' sel' : ''), title: n, 'aria-label': n,
+      onclick: () => {
+        ch.icon = n;
+        markDirty();
+        cur.replaceChildren(icon(n));
+        grid.querySelectorAll('.icon-pick').forEach(b => b.classList.toggle('sel', b.title === n));
+      },
+    }, icon(n)));
+  });
+  return el('details', { class: 'icon-box' }, el('summary', { class: 'icon-sum' }, cur, 'החלפת אייקון'), grid);
+}
+
+// ── שאלות ────────────────────────────────────────────────
+
+function questionCard(ch, q, i) {
+  const open = !!A.open[q.id];
+  const textEl = el('span', { class: 'qa-text' }, q.text || 'שאלה חדשה');
+  const card = el('div', { class: 'card qa' + (open ? ' open' : '') + (q.active === false ? ' off' : '') },
+    el('div', { class: 'qa-head' },
+      el('button', { class: 'qa-toggle', 'aria-expanded': open ? 'true' : 'false', onclick: () => { A.open[q.id] = !open; rerender(); } },
+        el('span', { class: 'qa-num' }, String(i + 1)),
+        el('span', { class: 'qa-body' }, textEl, el('span', { class: 'qa-flags' }, qFlags(q).join(' · ')))),
+      reorder(() => moveQ(ch, i, -1), () => moveQ(ch, i, 1), i === 0, i === ch.questions.length - 1)));
+  if (open) card.append(questionEditor(ch, q, i, () => { textEl.textContent = q.text || 'שאלה חדשה'; }));
+  return card;
+}
+
+function qFlags(q) {
+  const f = [TYPE_NAME[q.type] || q.type];
+  if (q.required) f.push('חובה');
+  if (q.showIf) f.push('לחלק מהעונים');
+  if (q.active === false) f.push('מוסתרת');
+  const n = A.answered[q.id];
+  if (n) f.push(n === 1 ? 'תשובה אחת' : n + ' תשובות');
+  return f;
+}
+
+function questionEditor(ch, q, i, onText) {
+  const n = A.answered[q.id] || 0;
+  const box = el('div', { class: 'qa-edit' });
+  box.append(field('נוסח השאלה', textArea(q, 'text', { keepEmpty: true, onInput: onText })));
+  box.append(field('הערה מתחת לשאלה', textInput(q, 'help'), 'רשות'));
+  const types = TYPES.some(t => t[0] === q.type) ? TYPES : TYPES.concat([[q.type, TYPE_NAME[q.type] || q.type]]);
+  box.append(field('סוג', selectInput(types, q.type, (v) => { changeType(q, v); markDirty(); rerender(); }),
+    n ? 'כבר יש תשובות, ושינוי סוג יערבב סוגי תשובות בתוצאות' : null));
+
+  if (q.type === 'radio' || q.type === 'checkbox') {
+    box.append(field('אפשרויות', optionsEditor(q), n ? 'אפשרות שנוסחה משתנה תופיע בתוצאות בנפרד מהישנה' : null, true));
+    box.append(toggle('להוסיף "אחר" עם שדה חופשי', !!q.other, (v) => setBool(q, 'other', v)));
+  }
+  if (q.type === 'checkbox') {
+    box.append(field('אפשרות שמבטלת את השאר', selectInput([['', 'אין']].concat(q.opts.filter(o => o.trim()).map(o => [o, o])), q.exclusive || '',
+      (v) => { if (v) q.exclusive = v; else delete q.exclusive; markDirty(); }), 'למשל "אין ילדים בבית"'));
+    box.append(field('כמה אפשר לסמן לכל היותר', numberInput(q, 'max', 1, 30), 'ריק = בלי הגבלה'));
+  }
+  if (q.type === 'scale') {
+    const range = (a, b) => Array.from({ length: b - a + 1 }, (_, k) => [a + k, String(a + k)]);
+    box.append(el('div', { class: 'adm-two' },
+      field('מ-', selectInput(range(0, 1), q.min ?? 1, (v) => { q.min = Number(v); markDirty(); })),
+      field('עד', selectInput(range(2, 10), q.max ?? 10, (v) => { q.max = Number(v); markDirty(); }))));
+    box.append(el('div', { class: 'adm-two' },
+      field('תווית בצד הנמוך', textInput(q, 'minLabel')),
+      field('תווית בצד הגבוה', textInput(q, 'maxLabel'))));
+    box.append(toggle('כפתור "לא יודע/ת"', !!q.dontKnow, (v) => setBool(q, 'dontKnow', v)));
+  }
+  if (q.type === 'number') {
+    box.append(el('div', { class: 'adm-two' },
+      field('מינימום', numberInput(q, 'min', -9999, 9999)),
+      field('מקסימום', numberInput(q, 'max', -9999, 9999))));
+  }
+  box.append(toggle('חובה', !!q.required, (v) => { setBool(q, 'required', v); rerender(); }));
+  box.append(toggle('מוצגת בסקר', q.active !== false, (v) => { setActive(q, v); rerender(); }));
+  const sources = (ch.id === 'about' ? [] : aboutChoices()).concat(ch.questions.slice(0, i).filter(isChoice));
+  if (sources.length || q.showIf) box.append(field('מוצגת רק ל...', condEditor(q, sources), null, true));
+  box.append(el('p', { class: 'qa-actions' }, el('button', { class: 'link-btn danger', onclick: () => deleteQuestion(ch, q) }, icon('trash-2'), ' מחיקת השאלה')));
+  return box;
+}
+
+function newQuestion(chId) {
+  return { id: uniqueId(chId), type: 'scale', text: '', min: 1, max: 10 };
+}
+
+function addQuestion(ch) {
+  const q = newQuestion(ch.id);
+  ch.questions.push(q);
+  A.open[q.id] = true;
+  markDirty();
+  rerender();
+  const cards = document.querySelectorAll('.qa');
+  const last = cards[cards.length - 1];
+  if (last) { last.scrollIntoView({ block: 'center' }); const t = last.querySelector('textarea'); if (t) t.focus(); }
+}
+
+function moveQ(ch, i, d) {
+  if (move(ch.questions, i, d)) { markDirty(); rerender(); }
+}
+
+function deleteQuestion(ch, q) {
+  const n = A.answered[q.id] || 0;
+  const deps = dependents(q.id);
+  const text = [
+    n ? (n === 1 ? 'יש לה תשובה אחת' : 'יש לה ' + n + ' תשובות') + '. הן נשארות בגיבוי, אבל לא יופיעו בדשבורד. אפשר במקום זה להסתיר אותה.' : '',
+    deps.length ? 'תנאי ההצגה שתלויים בה יוסרו (' + deps.length + ').' : '',
+  ].filter(Boolean).join(' ');
+  confirmModal('למחוק את השאלה?', text || null, 'מחיקה', () => {
+    deps.forEach(x => delete x.showIf);
+    ch.questions.splice(ch.questions.indexOf(q), 1);
+    delete A.open[q.id];
+    markDirty();
+    rerender();
+  });
+}
+
+// סוג חדש: שומרים רק את מה שרלוונטי אליו
+function changeType(q, t) {
+  const was = clone(q);
+  Object.keys(q).forEach(k => { if (!['id', 'text', 'help', 'required', 'active', 'showIf'].includes(k)) delete q[k]; });
+  q.type = t;
+  if (t === 'radio' || t === 'checkbox') {
+    q.opts = was.opts && was.opts.length ? was.opts : ['', ''];
+    if (was.other) q.other = true;
+    if (t === 'checkbox' && was.type === 'checkbox') { if (was.exclusive) q.exclusive = was.exclusive; if (was.max) q.max = was.max; }
+  }
+  if (t === 'scale') {
+    q.min = was.type === 'scale' ? was.min : 1;
+    q.max = was.type === 'scale' ? was.max : 10;
+    if (was.minLabel) q.minLabel = was.minLabel;
+    if (was.maxLabel) q.maxLabel = was.maxLabel;
+  }
+}
+
+function optionsEditor(q) {
+  const list = el('div', { class: 'opt-edit' });
+  const draw = () => {
+    list.replaceChildren();
+    q.opts.forEach((o, i) => {
+      const inp = el('input', { class: 'txt-input', placeholder: 'אפשרות ' + (i + 1), 'aria-label': 'אפשרות ' + (i + 1) });
+      inp.value = o;
+      inp.addEventListener('input', () => { const old = q.opts[i]; q.opts[i] = inp.value; renameOption(q, old, inp.value); markDirty(); });
+      list.append(el('div', { class: 'opt-edit-row' }, inp,
+        iconBtn('chevron-up', 'למעלה', i === 0, () => { move(q.opts, i, -1); markDirty(); draw(); }),
+        iconBtn('chevron-down', 'למטה', i === q.opts.length - 1, () => { move(q.opts, i, 1); markDirty(); draw(); }),
+        iconBtn('x', 'הסרה', q.opts.length <= 2, () => { const old = q.opts[i]; q.opts.splice(i, 1); renameOption(q, old, null); markDirty(); draw(); })));
+    });
+    list.append(el('button', { type: 'button', class: 'link-btn', onclick: () => {
+      q.opts.push('');
+      markDirty();
+      draw();
+      const inputs = list.querySelectorAll('input');
+      inputs[inputs.length - 1].focus();
+    } }, icon('plus'), ' אפשרות'));
+  };
+  draw();
+  return list;
+}
+
+// אפשרות ששונתה או נמחקה: מעדכנים גם את "שמבטלת את השאר" ואת התנאים שמפנים אליה
+function renameOption(q, oldVal, newVal) {
+  if (oldVal === null || oldVal === undefined) return;
+  if (q.exclusive === oldVal) { if (newVal) q.exclusive = newVal; else delete q.exclusive; }
+  dependents(q.id).forEach(x => {
+    const c = normCond(x.showIf);
+    if (!c.vals.includes(oldVal)) return;
+    const vals = c.vals.map(v => (v === oldVal ? newVal : v)).filter(v => v);
+    x.showIf = Object.assign({ q: c.q, vals }, c.neg ? { neg: true } : {});
+  });
+}
+
+// ── תנאי הצגה ────────────────────────────────────────────
+
+function normCond(c) {
+  return { q: c.q, vals: (c.vals || c.in || c.any || c.notIn || []).slice(), neg: !!(c.neg || c.notIn) };
+}
+
+function isChoice(q) {
+  return (q.type === 'radio' || q.type === 'checkbox') && (q.opts || []).length > 0;
+}
+
+function aboutChoices() {
+  const about = A.survey.chapters.find(c => c.id === 'about');
+  return about ? about.questions.filter(isChoice) : [];
+}
+
+function dependents(qid) {
+  const out = [];
+  A.survey.chapters.forEach(c => [c].concat(c.questions).forEach(x => { if (x.showIf && x.showIf.q === qid) out.push(x); }));
+  return out;
+}
+
+// "מוצג רק ל...": מי שסימן (או לא סימן) תשובות מסוימות בשאלה קודמת
+function condEditor(target, sources) {
+  const wrap = el('div', { class: 'cond' });
+  const short = (t) => (t.length > 34 ? t.slice(0, 34) + '…' : t);
+  const draw = () => {
+    wrap.replaceChildren();
+    const c = target.showIf ? normCond(target.showIf) : null;
+    const src = c ? sources.find(q => q.id === c.q) : null;
+    const choices = [['', 'לכולם']].concat(sources.map(q => [q.id, 'לפי: ' + short(q.text || q.id)]));
+    if (c && !src) choices.push([c.q, 'לפי שאלה שכבר לא קיימת']);
+    wrap.append(selectInput(choices, c ? c.q : '', (v) => {
+      if (!v) delete target.showIf; else target.showIf = { q: v, vals: [] };
+      markDirty();
+      draw();
+    }));
+    if (!c) return;
+    if (!src) { wrap.append(el('p', { class: 'adm-hint err' }, 'השאלה שהתנאי מפנה אליה לא קיימת. בחרו אחרת או "לכולם".')); return; }
+    wrap.append(selectInput([['in', 'למי שסימן אחת מאלה'], ['neg', 'לכל מי שלא סימן אף אחת מאלה']], c.neg ? 'neg' : 'in', (v) => {
+      target.showIf = Object.assign({ q: c.q, vals: c.vals }, v === 'neg' ? { neg: true } : {});
+      markDirty();
+    }));
+    const opts = el('div', { class: 'cond-opts' });
+    src.opts.filter(o => o.trim()).forEach(o => {
+      const cb = el('input', { type: 'checkbox' });
+      cb.checked = c.vals.includes(o);
+      cb.addEventListener('change', () => {
+        const cur = normCond(target.showIf);
+        const vals = cb.checked ? cur.vals.concat(o) : cur.vals.filter(x => x !== o);
+        target.showIf = Object.assign({ q: cur.q, vals }, cur.neg ? { neg: true } : {});
+        markDirty();
+      });
+      opts.append(el('label', { class: 'cond-opt' }, cb, el('span', {}, o)));
+    });
+    wrap.append(opts);
+  };
+  draw();
+  return wrap;
+}
+
+// ── טקסטים ───────────────────────────────────────────────
+
+function renderTexts() {
+  const m = A.survey.meta;
+  m.raffle = m.raffle || {};
+  m.faq = m.faq || [];
+  const keep = { keepEmpty: true };
+  return el('div', {},
+    el('div', { class: 'card' },
+      el('h3', { class: 'adm-h' }, 'מסך הפתיחה'),
+      field('שם הסקר', textInput(m, 'title', keep)),
+      field('שנה', textInput(m, 'year', keep)),
+      field('שם היישוב', textInput(m, 'yishuv', keep)),
+      field('משפט מתחת לכותרת', textArea(m, 'tagline', keep)),
+      field('שורה מתחת לכפתור', textArea(m, 'sub', keep)),
+      field('כמה דקות (על המדבקה)', numberInput(m, 'minutes', 1, 90))),
+    el('div', { class: 'card' },
+      el('h3', { class: 'adm-h' }, 'הגרלה'),
+      field('על הפוסטר', textArea(m.raffle, 'text', keep), 'מה שאחרי סימן השאלה מודגש'),
+      field('הפרס', textInput(m.raffle, 'prize', keep)),
+      field('בחלון ההרשמה', textInput(m.raffle, 'note', keep))),
+    el('div', { class: 'card' },
+      el('h3', { class: 'adm-h' }, 'שמות התחומים'),
+      ...m.categories.map(c => el('div', { class: 'cat-edit hue-' + c.hue }, el('span', { class: 'adm-ic' }, icon(c.icon)), textInput(c, 'title', keep)))),
+    el('div', { class: 'card' },
+      el('h3', { class: 'adm-h' }, 'שאלות ותשובות'),
+      faqEditor(m.faq)));
+}
+
+function faqEditor(list) {
+  const wrap = el('div', {});
+  const draw = () => {
+    wrap.replaceChildren();
+    list.forEach((f, i) => {
+      wrap.append(el('div', { class: 'faq-edit' },
+        el('div', { class: 'faq-edit-head' },
+          el('span', { class: 'qa-num' }, String(i + 1)),
+          el('span', { class: 'spacer' }),
+          reorder(() => { move(list, i, -1); markDirty(); draw(); }, () => { move(list, i, 1); markDirty(); draw(); }, i === 0, i === list.length - 1),
+          iconBtn('x', 'מחיקה', false, () => { list.splice(i, 1); markDirty(); draw(); })),
+        field('שאלה', textInput(f, 'q', { keepEmpty: true })),
+        field('תשובה', textArea(f, 'a', { keepEmpty: true }))));
+    });
+    wrap.append(el('button', { class: 'btn btn-ghost btn-block mt', onclick: () => { list.push({ q: '', a: '' }); markDirty(); draw(); } }, icon('plus'), 'שאלה ותשובה'));
+  };
+  draw();
+  return wrap;
+}
+
+// ── הגדרות (נשמרות מיד) ──────────────────────────────────
+
+function renderSettings() {
+  const st = A.settings;
+  const pwIn = el('input', { class: 'txt-input', type: 'password', placeholder: 'סיסמה חדשה, לפחות 8 תווים', 'aria-label': 'סיסמה חדשה', autocomplete: 'new-password' });
+  return el('div', {},
+    el('div', { class: 'card' },
+      toggle('הסקר פתוח למענה', st.surveyOpen !== false, (v) => saveSetting({ surveyOpen: v })),
+      toggle('הדוח הציבורי פעיל', !!st.publicReport, (v) => saveSetting({ publicReport: v })),
+      el('p', { class: 'adm-hint' }, el('a', { href: 'report.html', target: '_blank', rel: 'noopener' }, 'לדוח הציבורי'))),
+    el('div', { class: 'card' },
+      el('h3', { class: 'adm-h' }, 'סיסמת הצוות'),
+      el('p', { class: 'adm-hint mb' }, 'אותה סיסמה לדף הניהול ולדשבורד.'),
+      pwIn,
+      el('button', { class: 'btn btn-ghost btn-block mt', onclick: (e) => changePassword(pwIn, e.currentTarget) }, 'החלפת סיסמה')),
+    el('div', { class: 'card' },
+      el('h3', { class: 'adm-h' }, 'קישורים'),
+      el('p', {}, el('a', { href: './', target: '_blank', rel: 'noopener' }, 'הסקר')),
+      el('p', {}, el('a', { href: 'dashboard.html' }, 'הדשבורד')),
+      el('p', {}, el('a', { href: CONFIG.SHEETS_URL, target: '_blank', rel: 'noopener' }, 'הגיליון'), el('span', { class: 'muted small' }, ' (מסד הנתונים, לא עורכים בו)'))));
+}
+
+async function saveSetting(patch) {
+  try {
+    const res = await apiPost('saveSettings', Object.assign({ password: A.pw }, patch));
+    if (!res.success) throw new ServerSaid(res.message);
+    Object.assign(A.settings, patch);
+    showToast('נשמר', 'success', 1800);
+  } catch (e) {
+    showToast(e instanceof ServerSaid && e.message ? e.message : 'לא נשמר, נסו שוב', 'error');
+    rerender(); // המתג חוזר למצב האמיתי
+  }
+}
+
+async function changePassword(input, btn) {
+  const np = input.value.trim();
+  if (np.length < 8) { showToast('לפחות 8 תווים', 'warning'); return; }
+  btn.disabled = true;
+  try {
+    let res = await apiPost('saveSettings', { password: A.pw, newPassword: np });
+    // ניסיון חוזר אחרי שההחלפה כבר נקלטה נכשל על הסיסמה הישנה: בודקים עם החדשה
+    if (!res.success && res.retried && /סיסמה שגויה/.test(res.message || '')) {
+      const check = await apiPost('getAdmin', { password: np });
+      if (check.success) res = { success: true };
+    }
+    if (!res.success) throw new ServerSaid(res.message);
+    A.pw = np;
+    sessionStorage.setItem(PW_KEY, np);
+    input.value = '';
+    showToast('הסיסמה הוחלפה', 'success');
+  } catch (e) {
+    showToast(e instanceof ServerSaid && e.message ? e.message : 'לא הצליח, נסו שוב', 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ── רכיבי טופס ───────────────────────────────────────────
+
+function uniqueId(base) {
+  const ids = new Set();
+  A.survey.chapters.forEach(c => { ids.add(c.id); c.questions.forEach(q => ids.add(q.id)); });
+  let n = 1;
+  while (ids.has(base + '_' + n)) n++;
+  return base + '_' + n;
+}
+
+function move(arr, i, d) {
+  const j = i + d;
+  if (j < 0 || j >= arr.length) return false;
+  [arr[i], arr[j]] = [arr[j], arr[i]];
+  return true;
+}
+
+function setText(obj, key, v, keepEmpty) {
+  if (v === '' && !keepEmpty) delete obj[key]; else obj[key] = v;
+}
+
+function setBool(obj, key, on) {
+  if (on) obj[key] = true; else delete obj[key];
+  markDirty();
+}
+
+function setActive(obj, on) {
+  if (on) delete obj.active; else obj.active = false;
+  markDirty();
+}
+
+// composite: פקד עם כמה כפתורים, שלא נכנס לתוך <label> (לחיצה על התווית הייתה מפעילה את הראשון)
+function field(label, control, hint, composite) {
+  return el(composite ? 'div' : 'label', { class: 'adm-field' },
+    label ? el('span', { class: 'adm-label' }, label) : null,
+    control,
+    hint ? el('span', { class: 'adm-hint' }, hint) : null);
+}
+
+function textInput(obj, key, opts = {}) {
+  const i = el('input', { class: 'txt-input' });
+  i.value = obj[key] || '';
+  i.addEventListener('input', () => { setText(obj, key, i.value, opts.keepEmpty); markDirty(); if (opts.onInput) opts.onInput(); });
+  return i;
+}
+
+function textArea(obj, key, opts = {}) {
+  const t = el('textarea', { class: 'txt-input adm-area', rows: 2 });
+  t.value = obj[key] || '';
+  t.addEventListener('input', () => { setText(obj, key, t.value, opts.keepEmpty); markDirty(); if (opts.onInput) opts.onInput(); });
+  return t;
+}
+
+function numberInput(obj, key, min, max) {
+  const i = el('input', { class: 'txt-input adm-num', type: 'number', inputmode: 'numeric', min, max });
+  i.value = obj[key] ?? '';
+  i.addEventListener('input', () => { if (i.value === '') delete obj[key]; else obj[key] = Number(i.value); markDirty(); });
+  return i;
+}
+
+function selectInput(options, value, onChange) {
+  const s = el('select', { class: 'txt-input' }, ...options.map(([v, t]) => {
+    const o = el('option', { value: v }, t);
+    if (String(v) === String(value)) o.selected = true;
+    return o;
+  }));
+  s.addEventListener('change', () => onChange(s.value));
+  return s;
+}
+
+function toggle(label, on, onChange) {
+  const cb = el('input', { type: 'checkbox', class: 'sw-input' });
+  cb.checked = on;
+  cb.addEventListener('change', () => onChange(cb.checked));
+  return el('label', { class: 'sw' }, cb, el('span', { class: 'sw-track', 'aria-hidden': 'true' }), el('span', { class: 'sw-label' }, label));
+}
+
+function iconBtn(name, label, disabled, onclick) {
+  return el('button', { type: 'button', class: 'icon-btn', 'aria-label': label, title: label, disabled: !!disabled, onclick }, icon(name));
+}
+
+function reorder(up, down, noUp, noDown) {
+  return el('span', { class: 'reorder' }, iconBtn('chevron-up', 'למעלה', noUp, up), iconBtn('chevron-down', 'למטה', noDown, down));
+}
+
+function openModal(node) {
+  closeModal();
+  document.body.append(el('div', { class: 'modal-back', id: 'modalBack', onclick: (e) => { if (e.target.id === 'modalBack') closeModal(); } }, node));
+}
+
+function closeModal() {
+  const b = document.getElementById('modalBack');
+  if (b) b.remove();
+}
+
+function confirmModal(title, text, okLabel, onOk) {
+  openModal(el('div', { class: 'modal' },
+    el('h3', {}, title),
+    text ? el('p', {}, text) : null,
+    el('div', { class: 'modal-actions' },
+      el('button', { class: 'btn btn-primary', onclick: () => { closeModal(); onOk(); } }, okLabel),
+      el('button', { class: 'btn btn-ghost', onclick: closeModal }, 'ביטול'))));
+}
+</script>
+</body>
+</html>

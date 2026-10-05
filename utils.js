@@ -135,6 +135,24 @@ function setRid(rid) {
   localStorage.setItem(RID_KEY, rid.toUpperCase().trim());
 }
 
+// ── הסקר מהשרת מול survey-data.js ─────────────────────────
+// מה שנערך בדף הניהול גובר. שרת שעוד לא נשמר מדף הניהול (legacy) נזרע מהקוד לפני שהיה דף ניהול,
+// והקוד עדכני ממנו: עד השמירה הראשונה שם, לוקחים את הכול מהקוד.
+function mergeSurvey(server, bundled, legacy) {
+  if (legacy || !server || !Array.isArray(server.chapters)) return bundled;
+  const sm = server.meta || {}, bm = bundled.meta;
+  const meta = Object.assign({}, bm, sm, {
+    version: bm.version, // איפוס טיוטות נקבע בקוד
+    raffle: Object.assign({}, bm.raffle, sm.raffle || {}),
+    // תחום: הסדר, האייקון והצבע מהקוד, השם מדף הניהול
+    categories: bm.categories.map(c => Object.assign({}, c, { title: ((sm.categories || []).find(x => x.id === c.id) || c).title })),
+  });
+  return { meta, chapters: server.chapters };
+}
+
+// תשובת "לא יודע/ת" בסולם (dontKnow). טקסט ולא מספר, אז לא נכנסת לממוצעים
+const DONT_KNOW = 'לא יודע/ת';
+
 // ── "משהו שהיית רוצה להוסיף?" בסוף כל נושא ────────────────
 // נוסף לכל נושא בקוד ולא בגיליון, כדי שיופיע תמיד בלי לזרוע מחדש. לא בפרופיל, ולא בפאב
 // שכבר מסתיים בפידבק פתוח. שאלה בגיליון עם אותו id (למשל post_more) מחליפה את זו האוטומטית.

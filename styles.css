@@ -151,6 +151,8 @@ svg.ic { width: 1em; height: 1em; flex: none; display: inline-block; vertical-al
 
 .topbar-btn:hover { border-color: var(--line-strong); }
 
+a.topbar-btn { text-decoration: none; }
+
 /* "אמשיך אחר כך": בולט תמיד, גם במובייל */
 .topbar-btn.save-later { background: var(--ochre-soft); border-color: #E9CB8A; font-weight: 600; }
 
@@ -245,7 +247,7 @@ svg.ic { width: 1em; height: 1em; flex: none; display: inline-block; vertical-al
 
 .poster {
   position: relative;
-  height: 440px;
+  height: 462px;
   border-radius: var(--r-xl);
   overflow: hidden;
   background: var(--night);
@@ -287,28 +289,33 @@ svg.ic { width: 1em; height: 1em; flex: none; display: inline-block; vertical-al
 
 .sticker-time b { font-family: var(--font-display); font-size: 40px; line-height: .8; }
 
+/* ההגרלה: "ענית על הכול? נכנסת להגרלה" על הגבעות */
 .sticker-raffle {
-  bottom: 26px; left: 20px;
+  bottom: 14px; left: 14px;
+  max-width: 214px;
+  align-items: flex-start; justify-content: flex-start; gap: 8px;
   background: var(--surface);
   border-radius: 14px;
-  padding: 9px 13px;
-  font-size: 14px;
-  transform: rotate(5deg);
+  padding: 10px 12px;
+  font-size: 13.5px; font-weight: 500; line-height: 1.3; text-align: right;
+  transform: rotate(3deg);
   box-shadow: 0 6px 16px rgba(0, 0, 0, .18);
 }
 
-.sticker-raffle svg.ic { color: var(--terra); font-size: 18px; }
+.sticker-raffle svg.ic { color: var(--terra); font-size: 19px; margin-top: 1px; }
 
-.land-raffle { margin-top: 16px; }
+.sticker-raffle .r-txt { display: grid; gap: 2px; }
 
-.land-cta { display: grid; gap: 4px; margin-top: 14px; }
+.sticker-raffle b { font-weight: 700; }
+
+.land-cta { display: grid; gap: 4px; margin-top: 20px; }
 
 .land-cta .link-btn { justify-self: center; }
 
 .land-note { text-align: center; color: var(--muted); font-size: 14px; margin-top: 8px; line-height: 1.5; }
 
 @media (min-width: 560px) {
-  .poster { height: 470px; }
+  .poster { height: 490px; }
   .poster h1 { font-size: 110px; }
   .poster-sub { max-width: 300px; }
 }
@@ -541,6 +548,23 @@ svg.ic { width: 1em; height: 1em; flex: none; display: inline-block; vertical-al
 
 .scale-labels { display: flex; justify-content: space-between; gap: 12px; margin-top: 10px; font-size: 13px; color: var(--muted); font-weight: 500; }
 
+/* "לא יודע/ת" מתחת לסולם */
+.scale-dk-row { display: flex; justify-content: center; margin-top: 12px; }
+
+.scale-dk {
+  border: none; border-radius: 99px;
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1.5px var(--line-strong);
+  padding: 9px 20px;
+  font-weight: 600; font-size: 15px;
+  color: var(--ink-soft);
+  transition: background .14s ease, box-shadow .14s ease;
+}
+
+.scale-dk:hover { box-shadow: inset 0 0 0 2px var(--hue, var(--teal)); color: var(--ink); }
+
+.scale-dk.sel { background: var(--hue, var(--teal)); color: var(--hue-on, #fff); box-shadow: 0 3px 0 var(--hue-deep, var(--teal-deep)); }
+
 /* בחירה יחידה / מרובה */
 .opt-list { display: grid; gap: 8px; }
 
@@ -630,23 +654,16 @@ textarea.txt-input { min-height: 104px; resize: vertical; }
   color: var(--ink-soft);
 }
 
-.ch-note svg.ic, .email-privacy svg.ic { flex: none; margin-top: 3px; color: var(--teal); }
+.ch-note svg.ic { flex: none; margin-top: 3px; color: var(--teal); }
 
 /* מסך המייל */
 .email-input { text-align: center; font-size: 17px; }
-
-.email-privacy { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; font-size: 14px; line-height: 1.45; color: var(--muted); }
 
 .email-chip {
   text-align: center; font-weight: 600; color: var(--ink);
   background: var(--paper); border-radius: var(--r-sm);
   padding: 10px 12px; word-break: break-all;
 }
-
-/* מסך התחומים: מי ממלא עכשיו */
-.who { text-align: center; font-size: 13.5px; line-height: 1.6; color: var(--muted); margin-top: 18px; }
-
-.who bdi { color: var(--ink-soft); font-weight: 500; }
 
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
@@ -924,6 +941,181 @@ textarea.txt-input { min-height: 104px; resize: vertical; }
 }
 
 .pill-tab.sel { background: var(--teal); box-shadow: none; color: #fff; }
+
+/* ── דף הניהול ─────────────────────────────────────────── */
+
+.login-card { max-width: 400px; margin: 60px auto; }
+
+.err { color: var(--danger); }
+
+.seg { display: flex; gap: 4px; background: var(--paper-deep); border-radius: 99px; padding: 4px; margin: 16px 0 14px; }
+
+.seg-btn { flex: 1; border: none; background: none; border-radius: 99px; padding: 9px 6px; font-weight: 600; font-size: 14.5px; color: var(--ink-soft); }
+
+.seg-btn.sel { background: var(--surface); color: var(--ink); box-shadow: var(--shadow-sm); }
+
+.adm-banner { background: var(--ochre-soft); color: #6B5320; border-radius: var(--r-md); padding: 11px 14px; font-size: 14.5px; font-weight: 500; margin-bottom: 12px; }
+
+.adm-group { display: flex; align-items: center; gap: 8px; margin: 18px 4px 8px; font-size: 13.5px; font-weight: 700; color: var(--muted); }
+
+.adm-group i { width: 10px; height: 10px; border-radius: 50%; background: var(--hue, var(--line-strong)); }
+
+.adm-row {
+  display: flex; align-items: center; gap: 4px;
+  background: var(--surface);
+  border-radius: var(--r-md);
+  box-shadow: inset 0 0 0 1px var(--line);
+  margin-bottom: 8px;
+  padding-inline-end: 6px;
+}
+
+.adm-row.off, .qa.off { opacity: .6; }
+
+.adm-row-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; border: none; background: none; text-align: right; padding: 11px 12px; }
+
+.adm-ic {
+  width: 40px; height: 40px; border-radius: 12px; flex: none;
+  background: var(--hue-soft, var(--teal-soft)); color: var(--hue-deep, var(--teal));
+  display: grid; place-items: center; font-size: 20px;
+}
+
+.adm-row-body { flex: 1; min-width: 0; }
+
+.adm-row-title { display: block; font-weight: 600; font-size: 16px; }
+
+.adm-row-meta { display: block; font-size: 13px; color: var(--muted); }
+
+.adm-go { color: var(--muted); font-size: 18px; display: grid; }
+
+.reorder { display: flex; flex-direction: column; gap: 3px; flex: none; }
+
+.icon-btn { width: 34px; height: 28px; border: none; border-radius: 8px; background: var(--paper); color: var(--ink-soft); display: grid; place-items: center; font-size: 16px; flex: none; }
+
+.icon-btn:hover { background: var(--paper-deep); }
+
+.icon-btn[disabled] { opacity: .3; cursor: default; }
+
+.adm-field { display: block; margin-top: 14px; }
+
+.adm-field:first-child { margin-top: 0; }
+
+.adm-label { display: block; font-weight: 600; font-size: 14.5px; margin-bottom: 6px; }
+
+.adm-hint { display: block; font-size: 13px; color: var(--muted); margin-top: 5px; line-height: 1.45; }
+
+.adm-h { font-size: 19px; margin-bottom: 12px; }
+
+.adm-h2 { font-size: 19px; margin: 22px 2px 10px; }
+
+.adm-two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.adm-two .adm-field { margin-top: 14px; }
+
+textarea.adm-area { min-height: 70px; }
+
+.adm-num { max-width: 140px; }
+
+select.txt-input { appearance: auto; padding-block: 11px; }
+
+.back-link { display: inline-flex; align-items: center; gap: 4px; margin: 4px 0 8px; }
+
+.link-btn.danger { color: var(--danger); text-decoration-color: rgba(179, 64, 42, .35); display: inline-flex; align-items: center; gap: 4px; }
+
+/* מתג */
+.sw { display: flex; align-items: center; gap: 12px; margin-top: 16px; cursor: pointer; }
+
+.sw-input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+
+.sw-track { position: relative; flex: none; width: 46px; height: 28px; border-radius: 99px; background: var(--line-strong); transition: background .15s; }
+
+.sw-track::after {
+  content: ''; position: absolute; top: 3px; right: 3px;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .25);
+  transition: transform .15s;
+}
+
+.sw-input:checked + .sw-track { background: var(--teal); }
+
+.sw-input:checked + .sw-track::after { transform: translateX(-18px); }
+
+.sw-input:focus-visible + .sw-track { outline: 3px solid var(--ochre); outline-offset: 2px; }
+
+.sw-label { font-weight: 500; font-size: 15px; }
+
+/* אייקון לנושא */
+.icon-box { margin-top: 2px; }
+
+.icon-sum { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; list-style: none; font-weight: 500; font-size: 15px; color: var(--ink-soft); }
+
+.icon-sum::-webkit-details-marker { display: none; }
+
+.icon-cur { width: 40px; height: 40px; border-radius: 12px; background: var(--hue, var(--teal)); color: var(--hue-on, #fff); display: grid; place-items: center; font-size: 20px; }
+
+.icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(42px, 1fr)); gap: 6px; margin-top: 10px; }
+
+.icon-pick { height: 42px; border: none; border-radius: 10px; background: var(--paper); color: var(--ink-soft); display: grid; place-items: center; font-size: 20px; }
+
+.icon-pick.sel { background: var(--hue, var(--teal)); color: var(--hue-on, #fff); }
+
+/* שאלה */
+.qa { padding: 0; overflow: hidden; }
+
+.qa.open { box-shadow: inset 0 0 0 2px var(--hue, var(--teal)), var(--shadow-sm); }
+
+.qa-head { display: flex; align-items: center; gap: 4px; padding-inline-end: 8px; }
+
+.qa-toggle { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 10px; border: none; background: none; text-align: right; padding: 14px 14px 13px; }
+
+.qa-num { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--paper-deep); font-size: 13px; font-weight: 700; display: grid; place-items: center; }
+
+.qa-body { flex: 1; min-width: 0; }
+
+.qa-text { display: block; font-weight: 600; font-size: 15.5px; line-height: 1.4; }
+
+.qa-flags { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+
+.qa-edit { border-top: 1px solid var(--line); padding: 14px 14px 16px; }
+
+.qa-actions { margin-top: 12px; text-align: center; }
+
+.opt-edit-row { display: flex; align-items: center; gap: 5px; margin-bottom: 6px; }
+
+.opt-edit-row .txt-input { flex: 1; min-width: 0; padding: 10px 12px; }
+
+.cond { display: grid; gap: 8px; }
+
+.cond-opts { display: grid; gap: 6px; padding: 4px 2px; }
+
+.cond-opt { display: flex; align-items: center; gap: 8px; font-size: 14.5px; }
+
+.cond-opt input { width: 18px; height: 18px; accent-color: var(--teal); }
+
+.cat-edit { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+
+.faq-edit { border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 14px; }
+
+.faq-edit-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+
+.err-list { padding-inline-start: 20px; display: grid; gap: 6px; color: var(--ink-soft); font-size: 14.5px; }
+
+/* פס שמירה */
+.save-bar {
+  position: fixed; inset-inline: 0; bottom: 0; z-index: 60;
+  background: var(--night); color: #fff;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+  box-shadow: 0 -6px 20px rgba(0, 0, 0, .15);
+}
+
+.save-bar[hidden] { display: none; }
+
+.save-bar-in { max-width: var(--maxw); margin: 0 auto; display: flex; align-items: center; gap: 8px; }
+
+.sb-msg { flex: 1; font-size: 14px; font-weight: 500; }
+
+.save-bar .btn[hidden] { display: none; }
+
+.has-save-bar .wrap { padding-bottom: 150px; }
 
 /* ── עזרים ────────────────────────────────────────────── */
 

@@ -17,7 +17,7 @@ function toCell(v) {
 }
 
 class Sheet {
-  constructor(name) { this.name = name; this.rows = []; this.maxCols = 26; this.frozen = 0; }
+  constructor(name) { this.name = name; this.rows = []; this.maxCols = 26; this.frozen = 0; this.protections = []; }
   getName() { return this.name; }
   getLastRow() {
     for (let i = this.rows.length - 1; i >= 0; i--) if (this.rows[i].some(x => x !== '' && x !== undefined)) return i + 1;
@@ -46,6 +46,8 @@ class Sheet {
   deleteRow(r) { this.rows.splice(r - 1, 1); }
   setFrozenRows(n) { this.frozen = n; }
   setColumnWidth() {}
+  getProtections() { return this.protections; }
+  protect() { const p = { warningOnly: false, setDescription() { return this; }, setWarningOnly(w) { this.warningOnly = w; return this; } }; this.protections.push(p); return p; }
 }
 
 class Range {
@@ -84,6 +86,7 @@ class Spreadsheet {
   constructor() { this.sheets = {}; }
   getSheetByName(n) { return this.sheets[n] || null; }
   insertSheet(n) { if (this.sheets[n]) throw new Error('exists ' + n); return (this.sheets[n] = new Sheet(n)); }
+  deleteSheet(sh) { delete this.sheets[sh.getName()]; }
 }
 
 function createGas(ROOT){
@@ -94,7 +97,7 @@ const triggers = [];
 const logs = [];
 
 const ctx = {
-  SpreadsheetApp: { openById: () => SS },
+  SpreadsheetApp: { openById: () => SS, ProtectionType: { SHEET: 'SHEET' } },
   LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
   Utilities: {
     getUuid: () => crypto.randomUUID(),

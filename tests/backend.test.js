@@ -25,6 +25,7 @@ function check(name, cond, extra) {
 
 // ── 1. setup ──
 ctx.setup();
+check('setup: notice tab', !!SS.getSheetByName('קרא אותי'));
 const pw = () => SS.getSheetByName('הגדרות').rows.find(r => r[0] === 'dashboardPassword')[1];
 check('setup: random password created', typeof pw() === 'string' && pw().length === 10 && pw() !== 'nofim2026', pw());
 check('setup: keepWarm trigger', triggers.length === 1);
@@ -35,29 +36,38 @@ check('setup: no phone secret needed anymore', !props.PHONE_PEPPER);
 check('setup: email secret created in script properties', typeof props.EMAIL_SECRET === 'string' && props.EMAIL_SECRET.length === 64);
 check('setup: emails tab', !!SS.getSheetByName('מיילים'));
 
-// ── 2. seed ──
+// ── 2. שמירה ראשונה מדף הניהול ──
 check('ping', get({ action: 'ping' }).success === true);
-check('getSurvey before seed fails gracefully', get({ action: 'getSurvey' }).success === false);
+check('getSurvey before the first save fails gracefully', get({ action: 'getSurvey' }).success === false);
 let r = post({ action: 'seedSurvey', survey: SURVEY, password: '' });
-check('seed first time without password', r.success, r);
-r = post({ action: 'seedSurvey', survey: SURVEY, password: 'wrong' });
-check('seed again with wrong password fails', !r.success, r);
-r = post({ action: 'seedSurvey', survey: SURVEY, password: pw() });
-check('seed again with right password', r.success, r);
+check('old seed action is gone (no write without a password)', !r.success && /Unknown action/.test(r.message), r);
+r = post({ action: 'saveSurvey', survey: SURVEY, password: '' });
+check('save without password fails and writes nothing', !r.success && !SS.getSheetByName('שאלות'), r);
+r = post({ action: 'saveSurvey', survey: SURVEY, password: 'wrong' });
+check('save with wrong password fails', !r.success, r);
+r = post({ action: 'saveSurvey', survey: SURVEY, password: pw(), rev: '' });
+check('first save with the password', r.success && /^r[0-9a-f]{12}$/.test(r.rev), r);
+let rev = r.rev;
+r = post({ action: 'saveSurvey', survey: SURVEY, password: pw(), rev: '' });
+check('save with a stale rev is a conflict', !r.success && r.conflict === true, r);
+r = post({ action: 'saveSurvey', survey: SURVEY, password: pw(), rev });
+check('save with the current rev', r.success && r.rev !== rev, r);
+rev = r.rev;
 
 // ── 3. round-trip: הגיליון מחזיר את אותו שאלון ──
 const gs = get({ action: 'getSurvey' });
 check('getSurvey ok + open', gs.success && gs.open === true, gs.message);
+check('saved from admin = not legacy', gs.legacy === false, gs.legacy);
 const back = gs.survey;
 check('same chapter order', JSON.stringify(back.chapters.map(c => c.id)) === JSON.stringify(SURVEY.chapters.map(c => c.id)));
 for (const ch of SURVEY.chapters) {
   const b = back.chapters.find(x => x.id === ch.id);
-  for (const k of ['title', 'icon', 'desc', 'cat', 'intro', 'outro']) check('chapter ' + ch.id + '.' + k, (b[k] || '') === (ch[k] || ''), [b[k], ch[k]]);
+  for (const k of ['title', 'icon', 'desc', 'cat', 'intro', 'outro', 'noSkip']) check('chapter ' + ch.id + '.' + k, (b[k] || '') === (ch[k] || ''), [b[k], ch[k]]);
   check('chapter ' + ch.id + ' showIf', JSON.stringify(normCond(b.showIf)) === JSON.stringify(normCond(ch.showIf)), [b.showIf, ch.showIf]);
   check('chapter ' + ch.id + ' question order', JSON.stringify(b.questions.map(q => q.id)) === JSON.stringify(ch.questions.map(q => q.id)));
   for (const q of ch.questions) {
     const bq = b.questions.find(x => x.id === q.id);
-    for (const k of ['type', 'text', 'help', 'other', 'exclusive', 'min', 'max', 'minLabel', 'maxLabel']) {
+    for (const k of ['type', 'text', 'help', 'other', 'exclusive', 'min', 'max', 'minLabel', 'maxLabel', 'dontKnow']) {
       check('q ' + q.id + '.' + k, (bq[k] === undefined ? '' : bq[k]) === (q[k] === undefined ? '' : q[k]), [bq[k], q[k]]);
     }
     check('q ' + q.id + '.opts', JSON.stringify(bq.opts || []) === JSON.stringify(q.opts || []));
@@ -205,6 +215,10 @@ check('report: 1-7 scale carries its range', belong && belong.min === 1 && belon
 check('report: no free text', !commRep.questions.some(q => q.id === 'comm_focus'));
 check('report: <5 answers hidden', !r.report.chapters.some(c => c.questions.some(q => q.id === 'comm_budget3')));
 check('report: excludes discarded B', belong && !Object.keys(belong.hist).includes('1'), belong && belong.hist);
+// "לא יודע/ת" בסולם: נספר בנפרד ולא נכנס לממוצע
+['RDKAAAA2', 'RDKBBBB2', 'RDKCCCC2', 'RDKDDDD2', 'RDKEEEE2'].forEach((x, i) => post({ action: 'submitChapter', rid: x, chapter: 'budget', answers: { budget_priorities: i < 3 ? 4 + i : 'לא יודע/ת' } }));
+const bp = get({ action: 'getPublicReport' }).report.chapters.find(c => c.id === 'budget').questions.find(q => q.id === 'budget_priorities');
+check('report: dont-know counted apart from the average', bp && bp.count === 5 && bp.dontKnow === 2 && bp.avg === 5 && !Object.keys(bp.hist).some(k => isNaN(Number(k))), bp);
 
 // ── 10. סגירת הסקר ──
 sset.rows.find(x => x[0] === 'surveyOpen')[1] = 'לא';
@@ -216,17 +230,90 @@ check('getSurvey reports closed', get({ action: 'getSurvey' }).open === false);
 const qs = SS.getSheetByName('שאלות');
 qs.rows.push(['post', 'post_new', 'טקסט קצר', 'שאלה חדשה', '', '', '', '', '', '', '', '', '', 'כן', 1.5]);
 qs.rows.find(x => x[1] === 'post_best_hours')[13] = 'לא';
-const post2 = get({ action: 'getSurvey' }).survey.chapters.find(c => c.id === 'post');
+const post2 = ctx.loadSurvey(false).chapters.find(c => c.id === 'post');
 check('manual row sorted by its order column', JSON.stringify(post2.questions.map(q => q.id)) === JSON.stringify(['post_hours', 'post_new']), post2.questions.map(q => q.id));
+const post2all = ctx.loadSurvey(true).chapters.find(c => c.id === 'post');
+check('inactive question kept for the admin page', post2all.questions.find(q => q.id === 'post_best_hours').active === false);
+check('manual sheet edits do not reach the public survey (cached)', get({ action: 'getSurvey' }).survey.chapters.find(c => c.id === 'post').questions.some(q => q.id === 'post_best_hours'));
 
 // ── 12. גיליון שנזרע לפני עמודת "חובה": השרת לא מחזיר required, והאתר לוקח מ-survey-data.js ──
 const qTab = SS.getSheetByName('שאלות');
 const savedRows = qTab.rows.map(row => row.slice());
 qTab.rows.forEach(row => { row.length = Math.min(row.length, 15); });
-const legacy = get({ action: 'getSurvey' }).survey;
+const legacy = ctx.loadSurvey(false);
 check('legacy sheet: required not sent', legacy.chapters.every(c => c.questions.every(q => q.required === undefined)));
 qTab.rows = savedRows;
-check('with the column: about demographics required', get({ action: 'getSurvey' }).survey.chapters.find(c => c.id === 'about').questions.filter(q => q.required).length === 6);
+check('with the column: about demographics required', ctx.loadSurvey(false).chapters.find(c => c.id === 'about').questions.filter(q => q.required).length === SURVEY.chapters[0].questions.filter(q => q.required).length);
+// שרת שעוד לא נשמר מדף הניהול מסומן legacy, והאתר לוקח אז טקסטים ו"קצת עליך" מהקוד
+const revRow = SS.getSheetByName('הגדרות').rows.find(x => x[0] === 'surveyRev');
+const keepRev = revRow[1]; revRow[1] = '';
+check('no rev = legacy', get({ action: 'getSurvey' }).legacy === true);
+revRow[1] = keepRev;
+
+// ── 13. דף הניהול ──
+sset.rows.find(x => x[0] === 'surveyOpen')[1] = 'כן';
+r = post({ action: 'getAdmin', password: 'nope' });
+check('admin: wrong password', !r.success && !r.survey, r);
+r = post({ action: 'getAdmin', password: pw() });
+check('admin: loads survey, rev, settings', r.success && r.rev === rev && r.legacy === false && r.settings.surveyOpen === true && r.settings.publicReport === true, r.message || [r.rev, rev]);
+check('admin: answered counts from results', r.answered.comm_belong >= 5 && !r.answered.about_name === false, r.answered);
+// עריכה: טקסטים שהגיליון היה הופך, השבתה, אפשרות ושאלה חדשות
+const ed = JSON.parse(JSON.stringify(r.survey));
+const edPost = ed.chapters.find(c => c.id === 'post');
+edPost.questions[0].help = '=SUM(1)';
+edPost.questions[0].minLabel = '-ממש לא';
+edPost.questions[0].maxLabel = '1/10';
+edPost.questions.push({ id: 'post_x1', type: 'radio', text: '007', opts: ['+כן', "'לא", '10'], required: true });
+ed.chapters.find(c => c.id === 'zoo').active = false;
+ed.chapters.find(c => c.id === 'lib').questions[0].active = false;
+ed.meta = Object.assign({}, ed.meta, { tagline: 'כותרת חדשה' });
+r = post({ action: 'saveSurvey', survey: ed, password: pw(), rev });
+check('admin: save edits', r.success, r);
+rev = r.rev;
+const pub = get({ action: 'getSurvey' }).survey;
+const pq = pub.chapters.find(c => c.id === 'post').questions;
+check('tricky texts survive the sheet', pq[0].help === '=SUM(1)' && pq[0].minLabel === '-ממש לא' && pq[0].maxLabel === '1/10', pq[0]);
+const nq = pq.find(q => q.id === 'post_x1');
+check('new question with tricky options', nq && nq.text === '007' && JSON.stringify(nq.opts) === JSON.stringify(['+כן', "'לא", '10']) && nq.required === true, nq);
+check('inactive chapter hidden from the public survey', !pub.chapters.some(c => c.id === 'zoo'));
+check('inactive question hidden from the public survey', !pub.chapters.find(c => c.id === 'lib').questions.some(q => q.id === 'lib_services'));
+check('meta saved and served', pub.meta.tagline === 'כותרת חדשה');
+const adm = post({ action: 'getAdmin', password: pw() }).survey;
+check('admin still sees hidden items', adm.chapters.find(c => c.id === 'zoo').active === false && adm.chapters.find(c => c.id === 'lib').questions[0].active === false);
+check('new question got a results column', SS.getSheetByName('תוצאות').rows[0].includes('post_x1'));
+// אימות: שום דבר לא נכתב כשיש שגיאה
+const before = JSON.stringify(SS.getSheetByName('שאלות').rows);
+const bad = (fn) => { const x = JSON.parse(JSON.stringify(adm)); fn(x); return post({ action: 'saveSurvey', survey: x, password: pw(), rev }); };
+const errOf = (fn) => { const res = bad(fn); return res.success ? null : (res.errors || [res.message]).join(' / '); };
+check('validate: duplicate question id', /כפול/.test(errOf(x => { x.chapters[1].questions[1].id = x.chapters[1].questions[0].id; })));
+check('validate: pipe in an option', /\|/.test(errOf(x => { x.chapters[0].questions[1].opts[0] = 'א | ב'; })));
+check('validate: empty option', /אפשרויות/.test(errOf(x => { x.chapters[0].questions[1].opts.push(' '); })));
+check('validate: one option only', /אפשרויות/.test(errOf(x => { x.chapters[0].questions[1].opts = ['רק אחת']; })));
+check('validate: bad scale', /סולם/.test(errOf(x => { const q = x.chapters[1].questions[0]; q.min = 5; q.max = 3; })));
+check('validate: condition to a missing question', /שלא קיימת/.test(errOf(x => { x.chapters.find(c => c.id === 'scouts').showIf = { q: 'nope', vals: ['x'] }; })));
+check('validate: condition to a removed option', /שלא קיימת/.test(errOf(x => { x.chapters.find(c => c.id === 'about').questions.find(q => q.id === 'about_kids').opts.splice(1, 1); })));
+check('validate: missing text', /נוסח/.test(errOf(x => { x.chapters[1].questions[0].text = ' '; })));
+check('validate: bad id', /מזהה/.test(errOf(x => { x.chapters[1].questions[0].id = 'Bad Id'; })));
+check('validate: not a survey', /מבנה/.test(errOf(x => { x.chapters = 'x'; })));
+check('nothing written on validation errors', JSON.stringify(SS.getSheetByName('שאלות').rows) === before);
+r = post({ action: 'saveSurvey', survey: adm, password: pw(), rev: 'rold' });
+check('conflict on a stale rev', r.conflict === true);
+r = post({ action: 'saveSurvey', survey: adm, password: pw(), rev: 'rold', force: true });
+check('force overwrites', r.success, r);
+rev = r.rev;
+// הגדרות
+r = post({ action: 'saveSettings', password: pw(), surveyOpen: false, publicReport: false });
+check('settings: close survey + report', r.success && get({ action: 'getSurvey' }).open === false && !get({ action: 'getPublicReport' }).success, r);
+r = post({ action: 'saveSettings', password: pw(), surveyOpen: true });
+check('settings: reopen', r.success && get({ action: 'getSurvey' }).open === true);
+r = post({ action: 'saveSettings', password: pw(), newPassword: 'short' });
+check('settings: short password rejected', !r.success && /8/.test(r.message), r);
+const oldPw = pw();
+r = post({ action: 'saveSettings', password: oldPw, newPassword: '00123456' });
+check('settings: numeric password kept as text', r.success && pw() === '00123456' && post({ action: 'getAdmin', password: '00123456' }).success && !post({ action: 'getAdmin', password: oldPw }).success, [r, pw()]);
+// הגיליון: הסבר במקום מדריך עריכה, ואזהרה על הטאבים
+check('notice tab instead of the editing guide', !!SS.getSheetByName('קרא אותי') && !SS.getSheetByName('מדריך עריכה') && SS.getSheetByName('קרא אותי').rows[1][0].includes('admin.html'));
+check('tabs protected with a warning, once', ['פרקים', 'שאלות', 'הגדרות', 'תוצאות'].every(n => SS.getSheetByName(n).protections.length === 1 && SS.getSheetByName(n).protections[0].warningOnly === true));
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

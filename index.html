@@ -100,23 +100,8 @@ async function init() {
     const res = await apiCall('getSurvey');
     if (res.open === false) return goClosed();
     if (res.success && res.survey && res.survey.chapters && res.survey.chapters.length) {
-      // "חובה" מגיע מהגיליון. גיליון שנזרע לפני שהעמודה נוספה (10/2026) לא שולח אותו, ואז לפי survey-data.js.
-      // בגיליון כזה גם "קצת עליך" נלקח מהקוד, כי התיאור הישן שם ("הכול רשות") סותר את שאלות החובה.
-      // סנכרון אחד מ-setup.html מעדכן את הגיליון, ומשם הכול שוב מהגיליון.
-      const chs = res.survey.chapters;
-      if (chs.every(c => c.questions.every(q => q.required === undefined))) {
-        const i = chs.findIndex(c => c.id === 'about');
-        const about = window.SURVEY_DATA.chapters.find(c => c.id === 'about');
-        if (i >= 0 && about) chs[i] = about;
-      }
-      const bundled = {};
-      window.SURVEY_DATA.chapters.forEach(c => c.questions.forEach(q => { bundled[q.id] = q; }));
-      chs.forEach(c => c.questions.forEach(q => {
-        if (q.required === undefined) q.required = !!(bundled[q.id] && bundled[q.id].required);
-      }));
-      // השאלות מהגיליון (שם הצוות עורך), הטקסטים הכלליים (פתיח, שו"ת, הגרלה, תחומים) מהקוד
-      S.survey = { meta: window.SURVEY_DATA.meta, chapters: res.survey.chapters };
-      // הגרסה מהגיליון (שהצוות אולי ערך) נכנסת לתוקף; באמצע פרק לא מרעננים כדי לא לקטוע הקלדה
+      // מה שנערך בדף הניהול נכנס לתוקף. באמצע פרק לא מרעננים, כדי לא לקטוע הקלדה
+      S.survey = mergeSurvey(res.survey, window.SURVEY_DATA, res.legacy);
       if (S.view === 'landing' || S.view === 'categories') goHome();
       else updateProgress();
     }
@@ -235,7 +220,7 @@ function nextChapter() {
   return orderedChapters().find(ch => !S.done[ch.id]) || null;
 }
 
-// "קצת עליך" חובה לפני הנושאים (אם הפרק פעיל בגיליון)
+// "קצת עליך" עוד לא מולא (ואם הוא פעיל בשאלון)
 function needsAbout() {
   return !S.done['about'] && S.survey.chapters.some(c => c.id === 'about');
 }
@@ -256,10 +241,8 @@ function goLanding() {
   const m = S.survey.meta;
   const view = el('div', { class: 'land' },
     poster(m, null, m.tagline, true),
-    el('div', { class: 'raffle-strip land-raffle' },
-      el('span', { class: 'r-icon' }, icon('gift')), el('span', { class: 'txt' }, m.raffle.text)),
     el('div', { class: 'land-cta' },
-      el('button', { class: 'btn btn-primary btn-block', onclick: startSurvey }, 'מתחילים', icon('arrow-left'))
+      el('button', { class: 'btn btn-primary btn-block', onclick: () => (hasIdentity() ? goCategories() : goEmail()) }, 'מתחילים', icon('arrow-left'))
     ),
     el('p', { class: 'land-note' }, m.sub)
   );
@@ -278,11 +261,21 @@ function poster(m, headline, sub, withStickers) {
   const p = el('div', { class: 'poster' }, posterArt(), copy);
   if (withStickers) {
     p.append(
-      el('span', { class: 'sticker sticker-time', 'aria-hidden': 'true' }, el('b', {}, '10'), 'דקות'),
-      el('span', { class: 'sticker sticker-raffle' }, icon('gift'), 'הגרלה על 150 ₪')
+      el('span', { class: 'sticker sticker-time', 'aria-hidden': 'true' }, el('b', {}, String(m.minutes || 10)), 'דקות'),
+      raffleSticker(m.raffle.text)
     );
   }
   return p;
+}
+
+// ההגרלה על הפוסטר: השאלה רגילה, ההבטחה מודגשת ("ענית על הכול? נכנסת להגרלה!")
+function raffleSticker(text) {
+  const t = String(text || '').replace(/(\d) ₪/g, '$1\u00A0₪'); // "150 ₪" לא נשבר בין שורות
+  const i = t.indexOf('?');
+  const body = i > 0 && i < t.length - 1
+    ? [el('span', {}, t.slice(0, i + 1)), el('b', {}, t.slice(i + 1).trim())]
+    : [el('b', {}, t)];
+  return el('span', { class: 'sticker sticker-raffle' }, icon('gift'), el('span', { class: 'r-txt' }, ...body));
 }
 
 function posterArt() {
@@ -319,12 +312,14 @@ function goCategories() {
       el('h2', {}, stats.complete ? 'סיימתם, תודה!' : stats.done ? 'ממשיכים?' : 'במה מתחילים?'),
       el('p', {}, topicStats().done + ' מתוך ' + topicStats().total + ' נושאים')),
   ];
-  if (next) {
-    kids.push(el('button', { class: 'btn btn-primary btn-block', style: 'margin-bottom:14px', onclick: startSurvey },
-      !S.done['about'] ? 'מתחילים' : (topicStats().done ? 'להמשיך: ' : 'לנושא הראשון: ') + next.title, icon('arrow-left')));
+  if (next || needsAbout()) {
+    const label = needsAbout()
+      ? (topicStats().done ? 'להמשיך: קצת עליך' : 'מתחילים')
+      : (topicStats().done ? 'להמשיך: ' : 'לנושא הראשון: ') + next.title;
+    kids.push(el('button', { class: 'btn btn-primary btn-block', style: 'margin-bottom:14px', onclick: startSurvey }, label, icon('arrow-left')));
   }
 
-  // "קצת עליך": חובה לפני הנושאים (goChapter מפנה אליו)
+  // "קצת עליך": אפשר להתחיל בו. מי שמתחיל בנושא אחר עובר בו בסוף הנושא (afterChapterDone)
   const aboutDone = !!S.done['about'];
   kids.push(el('button', { class: 'profile-strip' + (aboutDone ? ' is-done' : ''), onclick: () => goChapter('about') },
     el('span', { class: 'p-icon' }, icon('user-round')),
@@ -369,14 +364,6 @@ function goCategories() {
     kids.push(strip([el('strong', {}, left === 1 ? 'עוד נושא אחד' : 'עוד ' + left + ' נושאים'), ' ואתם בהגרלת ' + m.raffle.prize]));
   } else {
     kids.push(strip(['משלימים את הסקר ונכנסים להגרלת ', el('strong', {}, m.raffle.prize)]));
-  }
-
-  // מכשיר משותף: מי ממלא עכשיו, ומעבר למישהו אחר בלי לגעת בתשובות שכבר נשמרו
-  const email = localStorage.getItem(EMAIL_KEY);
-  if (email) {
-    kids.push(el('p', { class: 'who' },
-      'ממלאים בתור ', el('bdi', { dir: 'ltr' }, email), el('br'),
-      el('button', { class: 'link-btn', onclick: showSwitchModal }, 'מישהו אחר ממלא?')));
   }
 
   setView(el('div', {}, ...kids), null, 'categories');
@@ -436,12 +423,7 @@ function visibleQuestionCount(ch) {
 // ── מסך פרק ──────────────────────────────────────────────
 
 function goChapter(chId) {
-  // קודם המייל (סקר אחד לכל כתובת), ואז "קצת עליך", שהפרטים בו חובה
-  if (!hasIdentity()) return goEmail();
-  if (chId !== 'about' && needsAbout()) {
-    showToast('מתחילים ב"קצת עליך", חצי דקה', 'info', 2400);
-    chId = 'about';
-  }
+  if (!hasIdentity()) return goEmail(); // המייל קודם לכול: סקר אחד לכל כתובת
   const ch = S.survey.chapters.find(c => c.id === chId);
   if (!ch) return goCategories();
   const cat = catOf(ch);
@@ -472,8 +454,8 @@ function goChapter(chId) {
 
   // נושא שנשמר ממכשיר אחר: התשובות לא מגיעות לכאן, כדי שמי שמקליד מייל של מישהו אחר לא יראה אותן
   if (chId in S.remote) {
-    container.append(el('p', { class: 'ch-note' }, icon('lock'),
-      el('span', {}, 'התשובות שלך לנושא הזה כבר שמורות. כאן הן לא מוצגות, כדי שאף אחד אחר לא יוכל לראות אותן. מענה חדש יחליף אותן.')));
+    container.append(el('p', { class: 'ch-note' }, icon('check'),
+      el('span', {}, 'הנושא הזה כבר נשמר. מענה חדש יחליף את התשובות הקודמות.')));
   }
   if (withMore(ch).some(q => q.required)) {
     container.append(el('p', { class: 'req-legend' }, el('span', { class: 'q-req', 'aria-hidden': 'true' }, '*'), ' שאלת חובה'));
@@ -485,7 +467,8 @@ function goChapter(chId) {
 
   if (ch.outro) container.append(el('p', { class: 'ch-outro' }, ch.outro));
 
-  if (ch.id !== 'about') {
+  // noSkip: נושא שרלוונטי לכולם (למשל התקציב), בלי "לא רלוונטי"
+  if (ch.id !== 'about' && !ch.noSkip) {
     container.append(el('p', { class: 'center' },
       el('button', { class: 'skip-link', onclick: () => skipChapter(ch) }, 'הנושא לא רלוונטי אליי, לנושא הבא ←')
     ));
@@ -548,23 +531,25 @@ function renderQuestion(ch, q, answers) {
 }
 
 function renderScale(ch, q, answers) {
-  const wrap = el('div', {});
+  const wrap = el('div', { role: 'radiogroup', 'aria-label': q.text });
   const lo = q.min || 1, hi = q.max || 10;
-  const grid = el('div', { class: 'scale-grid', role: 'radiogroup', 'aria-label': q.text });
+  const grid = el('div', { class: 'scale-grid' });
   // סולם קצר (למשל 1–7) נכנס בשורה אחת גם במובייל; 1–10 נשבר ל-5+5
   if (hi - lo + 1 <= 7) grid.style.gridTemplateColumns = 'repeat(' + (hi - lo + 1) + ', 1fr)';
+  const chips = [];
+  const paint = () => chips.forEach(([c, v]) => {
+    c.classList.toggle('sel', answers[q.id] === v);
+    c.setAttribute('aria-checked', answers[q.id] === v ? 'true' : 'false');
+  });
+  const pick = (v) => {
+    const already = answers[q.id] === v;
+    answers[q.id] = already ? undefined : v;
+    paint();
+    saveAnswer(ch, q.id, already ? '' : v);
+  };
   for (let v = lo; v <= hi; v++) {
-    const chip = el('button', {
-      class: 'scale-chip' + (answers[q.id] === v ? ' sel' : ''),
-      type: 'button', role: 'radio', 'aria-checked': answers[q.id] === v ? 'true' : 'false',
-      onclick: () => {
-        const already = answers[q.id] === v;
-        answers[q.id] = already ? undefined : v;
-        grid.querySelectorAll('.scale-chip').forEach(c => { c.classList.remove('sel'); c.setAttribute('aria-checked', 'false'); });
-        if (!already) { chip.classList.add('sel'); chip.setAttribute('aria-checked', 'true'); }
-        saveAnswer(ch, q.id, already ? '' : v);
-      }
-    }, String(v));
+    const chip = el('button', { class: 'scale-chip', type: 'button', role: 'radio', onclick: () => pick(v) }, String(v));
+    chips.push([chip, v]);
     grid.append(chip);
   }
   wrap.append(grid,
@@ -572,6 +557,13 @@ function renderScale(ch, q, answers) {
       el('span', {}, q.minLabel || ''),
       el('span', {}, q.maxLabel || '')
     ));
+  // "לא יודע/ת" היא תשובה בפני עצמה, ולא נכנסת לממוצע
+  if (q.dontKnow) {
+    const dk = el('button', { class: 'scale-dk', type: 'button', role: 'radio', onclick: () => pick(DONT_KNOW) }, DONT_KNOW);
+    chips.push([dk, DONT_KNOW]);
+    wrap.append(el('div', { class: 'scale-dk-row' }, dk));
+  }
+  paint();
   return wrap;
 }
 
@@ -802,10 +794,10 @@ async function submitChapter(ch) {
   if (!Object.keys(visAns).length) {
     openModal(el('div', { class: 'modal' },
       el('h3', {}, icon('circle-help'), 'עוד לא עניתם כאן'),
-      el('p', {}, 'אפשר לענות אפילו על שאלה אחת, או לסמן שהנושא לא רלוונטי ולהמשיך הלאה.'),
+      el('p', {}, ch.noSkip ? 'אפשר לענות אפילו על שאלה אחת.' : 'אפשר לענות אפילו על שאלה אחת, או לסמן שהנושא לא רלוונטי ולהמשיך הלאה.'),
       el('div', { class: 'mt', style: 'display:grid; gap:10px' },
         el('button', { class: 'btn btn-primary', onclick: closeModal }, 'למענה'),
-        el('button', { class: 'btn btn-ghost', onclick: () => { closeModal(); skipChapter(ch); } }, 'הנושא לא רלוונטי אליי, לנושא הבא ←')
+        ch.noSkip ? null : el('button', { class: 'btn btn-ghost', onclick: () => { closeModal(); skipChapter(ch); } }, 'הנושא לא רלוונטי אליי, לנושא הבא ←')
       )
     ));
     return;
@@ -861,10 +853,16 @@ function afterChapterDone(ch, skipped) {
     return;
   }
 
+  // מי שהתחיל בנושא אחר עובר דרך "קצת עליך" בסוף הנושא
+  if (ch.id !== 'about' && needsAbout()) {
+    showToast((skipped ? 'דילגנו. ' : 'נשמר! ') + 'עכשיו קצת עליך, חצי דקה', 'success', 2600);
+    return goChapter('about');
+  }
+
   const next = nextChapter();
   if (!next) return goCategories();
   const cat = catOf(ch), nextCat = catOf(next);
-  const msg = ch.id === 'about' ? 'תודה! מתחילים: ' + next.title
+  const msg = ch.id === 'about' ? (topicStats().done ? 'תודה! ממשיכים: ' : 'תודה! מתחילים: ') + next.title
     : cat && nextCat && cat.id !== nextCat.id ? 'סיימתם את ' + cat.title + '! עוברים ל' + nextCat.title
     : (skipped ? 'דילגנו. ' : 'נשמר! ') + 'ממשיכים: ' + next.title;
   showToast(msg, 'success', 2400);
@@ -891,13 +889,8 @@ function goEmail() {
       el('span', { class: 'ch-icon' }, icon('mail')),
       el('div', {},
         el('h2', {}, 'נתחיל במייל'),
-        el('p', { class: 'ch-desc' }, 'כך כל אחד ממלא פעם אחת, וממשיכים מכל מכשיר'))),
-    el('div', { class: 'q-card' },
-      el('p', { class: 'q-text' }, 'כתובת המייל שלך'),
-      el('div', { class: 'q-body' }, input),
-      el('p', { class: 'email-privacy' }, icon('lock'),
-        el('span', {}, 'לא שולחים אליו כלום. הכתובת לא נשמרת אצלנו, רק קוד מוצפן שלה, כך שאף אחד לא רואה אותה.'))),
-    el('p', { class: 'land-note' }, 'כבר התחלתם במכשיר אחר? מקלידים את אותו מייל וממשיכים מאיפה שעצרתם.'),
+        el('p', { class: 'ch-desc' }, 'הסקר אנונימי, והמייל לא גלוי לאף אחד.'))),
+    el('div', { class: 'q-card' }, input),
     el('div', { class: 'chapter-nav' },
       el('button', { class: 'btn btn-ghost btn-round', 'aria-label': 'חזרה', title: 'חזרה', onclick: goHome }, icon('arrow-right')),
       go)
@@ -925,7 +918,7 @@ async function submitEmail(input, btn) {
     }
   }
   localStorage.setItem(EMAIL_KEY, email);
-  startSurvey();
+  goCategories(); // קודם רואים את כל הנושאים
 }
 
 // אותו מייל ממכשיר אחר: ממשיכים את אותו סקר. מהשרת מגיעה רק ההתקדמות (אילו נושאים נשמרו),
@@ -955,23 +948,10 @@ function showLaterModal() {
   const email = localStorage.getItem(EMAIL_KEY);
   openModal(el('div', { class: 'modal' },
     el('h3', {}, icon('bookmark'), 'ממשיכים מתי שנוח'),
-    el('p', {}, 'כל נושא נשמר ברגע שמסיימים אותו, אפשר פשוט לסגור.'),
-    el('p', {}, el('strong', {}, 'כדי להמשיך: '), 'מהמכשיר הזה פשוט חוזרים לאתר. ממכשיר אחר נכנסים ל-',
-      el('bdi', { dir: 'ltr' }, 'sekernofey.online'), email ? ' ומקלידים את המייל שלך:' : ' ומקלידים את המייל שהזנתם בתחילת הסקר.'),
+    el('p', {}, email ? 'הכול נשמר. ממשיכים מכל מכשיר עם המייל:' : 'הכול נשמר, אפשר פשוט לחזור לאתר.'),
     email ? el('p', { class: 'email-chip', dir: 'ltr' }, email) : null,
     el('div', { class: 'modal-actions' },
       el('button', { class: 'btn btn-primary', onclick: closeModal }, 'הבנתי'))
-  ));
-}
-
-// מכשיר משותף: מישהו אחר ממלא. מה שמילאו עד עכשיו נשאר בשרת, וחוזרים אליו עם אותו מייל
-function showSwitchModal() {
-  openModal(el('div', { class: 'modal' },
-    el('h3', {}, icon('users'), 'מישהו אחר ממלא?'),
-    el('p', {}, 'מה שמילאת עד עכשיו שמור. כדי להמשיך אותו, נכנסים שוב ומקלידים את המייל שלך.'),
-    el('div', { class: 'modal-actions' },
-      el('button', { class: 'btn btn-primary', onclick: () => { clearLocal(); closeModal(); goLanding(); } }, 'החלפה'),
-      el('button', { class: 'btn btn-ghost', onclick: closeModal }, 'ביטול'))
   ));
 }
 

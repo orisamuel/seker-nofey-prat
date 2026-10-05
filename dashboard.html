@@ -20,7 +20,7 @@
   <div class="topbar-in">
     <span class="brand">דשבורד הצוות · נופי פרת</span>
     <div class="spacer"></div>
-    <a class="btn btn-ghost btn-sm" id="sheetLink" href="#" target="_blank" rel="noopener">פתיחת הגיליון</a>
+    <a class="btn btn-ghost btn-sm" href="admin.html">ניהול הסקר</a>
   </div>
 </header>
 
@@ -42,7 +42,6 @@ const DIM_LABEL = {
 init();
 
 async function init() {
-  document.getElementById('sheetLink').href = CONFIG.SHEETS_URL;
   const savedPw = sessionStorage.getItem('np_dash_pw');
   if (savedPw) { load(savedPw); } else { renderLogin(); }
 }
@@ -349,11 +348,13 @@ function renderChapter(ch, list) {
 
     if (q.type === 'scale' || q.type === 'number') {
       const nums = vals.map(Number).filter(n => !isNaN(n));
-      const avg = nums.reduce((a, b) => a + b, 0) / nums.length;
-      card.append(el('div', { class: 'mb' },
+      const dk = vals.length - nums.length; // "לא יודע/ת" לא נכנס לממוצע
+      const avg = nums.length ? nums.reduce((a, b) => a + b, 0) / nums.length : 0;
+      if (nums.length) card.append(el('div', { class: 'mb' },
         q.type === 'scale' ? avgChip(avg, q) : el('span', { class: 'avg-chip avg-mid' }, avg.toFixed(1)),
         el('span', { class: 'small muted' }, '  ממוצע')));
-      if (q.type === 'scale') {
+      if (dk) card.append(el('p', { class: 'small muted mb' }, DONT_KNOW + ': ' + dk));
+      if (q.type === 'scale' && nums.length) {
         const hist = {};
         nums.forEach(n => hist[n] = (hist[n] || 0) + 1);
         const maxH = Math.max(...Object.values(hist));
