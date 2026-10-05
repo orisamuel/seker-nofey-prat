@@ -36,6 +36,20 @@ const D = {
   openSearch: '', openTopic: '',           // תשובות פתוחות
 };
 
+// מה מוצג בזמן הטעינה: שלבים אמיתיים, ובין לבין כמה בשביל ההומור (רעיון של אורי), כדי שהמתנה ארוכה תרגיש סבירה
+const LOAD_STEPS = [
+  'מתחברים לשרת של הסקר…',
+  'אוספים את כל התשובות…',
+  'מצפינים פרטים אישיים…',
+  'מסננים את מי שהתחיל מחדש…',
+  'מאחדים את התשובות של כל עונה…',
+  'מצליבים גיל, ותק ומגורים…',
+  'מחשבים ממוצעים ופערים בין קבוצות…',
+  'קוראים בעיון את התשובות הפתוחות…',
+  'מיישרים את העמודות בגרפים…',
+  'מבריקים את הצבעים…',
+];
+
 const MIN_GROUP = 5;   // קבוצה קטנה מזה לא נכנסת להשוואות (רעש סטטיסטי)
 const GAP_MIN = 0.12;  // פער מינימלי להצגה, כחלק מטווח הסולם (בסולם 1–10: בערך נקודה)
 const DIM_LABEL = {
@@ -66,7 +80,7 @@ function renderLogin(err) {
 
 async function load(password) {
   const app = document.getElementById('app');
-  app.replaceChildren(el('div', { class: 'center', style: 'padding:80px 0' }, el('div', { class: 'spinner' }), el('p', { class: 'muted' }, 'טוען נתונים…')));
+  app.replaceChildren(loadingSteps(LOAD_STEPS, { slow: SLOW_MSG }));
   try {
     if (isLocalMode()) throw new Error('SCRIPT_URL עדיין לא הוגדר ב-config.js');
     const res = await apiPost('getResults', { password }); // POST: הסיסמה לא נכנסת לכתובת

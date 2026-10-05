@@ -1093,8 +1093,14 @@ function closeDrawer() {
 
 // ── הגרלה ────────────────────────────────────────────────
 
+// בזמן ההרשמה (מחכים שכל התשובות יגיעו לשרת ושהוא יבדוק). תושבים רואים את זה: הומור כן,
+// הבטחות שלא מתקיימות (למשל "מצפינים") לא
+const RAFFLE_STEPS = ['שולחים את התשובות האחרונות…', 'בודקים שכל הנושאים הגיעו…', 'שומרים את הפרטים בנפרד מהתשובות…', 'מערבבים את הפתקים בקופסה…', 'מכניסים את השם להגרלה…'];
+
 function showRaffleModal() {
   const m = S.survey.meta.raffle;
+  const status = el('div', {});
+  let actions = null;
   const nameIn = el('input', { class: 'txt-input', placeholder: 'שם מלא', 'aria-label': 'שם מלא' });
   const phoneIn = el('input', { class: 'txt-input mt', placeholder: 'טלפון נייד', type: 'tel', inputmode: 'tel', dir: 'ltr', style: 'text-align:center', 'aria-label': 'טלפון' });
 
@@ -1104,7 +1110,8 @@ function showRaffleModal() {
     el('p', { class: 'center' }, m.prize + ' יכול להיות שלכם.'),
     el('p', { class: 'small muted center' }, m.note),
     nameIn, phoneIn,
-    el('div', { class: 'modal-actions' },
+    status,
+    actions = el('div', { class: 'modal-actions' },
       el('button', {
         class: 'btn btn-accent', style: 'flex:1', onclick: async (e) => {
           const b = e.currentTarget; // הכפתור עצמו, גם כשלוחצים על האייקון שבתוכו
@@ -1113,7 +1120,8 @@ function showRaffleModal() {
           if (!validPhone(phone)) { showToast('בדקו את מספר הטלפון', 'warning'); return; }
           if (!S.serverMode) { showToast('בתצוגה המקדימה אין הרשמה. היא תיפתח כשהסקר יעלה לאוויר', 'warning', 4500); return; }
           b.disabled = true;
-          b.textContent = 'נרשם…';
+          actions.hidden = true;
+          status.replaceChildren(loadingSteps(RAFFLE_STEPS, { inline: true, slow: 'עוד רגע, כמעט שם…' }));
           try {
             // השרת בודק שכל הנושאים נענו, אז קודם כל מה שבתור צריך להגיע אליו
             if (!(await drain(45000))) throw new ServerSaid('חלק מהתשובות עוד לא הגיעו לשרת. בדקו את החיבור ונסו שוב');
@@ -1128,7 +1136,8 @@ function showRaffleModal() {
             goCategories();
           } catch (err) {
             b.disabled = false;
-            b.replaceChildren('הרשמה', icon('gift'));
+            actions.hidden = false;
+            status.replaceChildren();
             showToast(err instanceof ServerSaid && err.message ? err.message : 'ההרשמה נכשלה, נסו שוב', 'error');
           }
         }

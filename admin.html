@@ -39,6 +39,9 @@
 const PW_KEY = 'np_dash_pw'; // אותה סיסמה ואותה כניסה כמו בדשבורד
 const TYPES = [['scale', 'סולם'], ['radio', 'בחירה אחת'], ['checkbox', 'בחירה מרובה'], ['text', 'טקסט קצר'], ['textarea', 'טקסט ארוך'], ['number', 'מספר']];
 const TYPE_NAME = Object.fromEntries(TYPES.concat([['rank', 'דירוג']]));
+// מה מוצג בזמן טעינה ושמירה: שלבים אמיתיים, ובין לבין כמה בשביל ההומור (רעיון של אורי)
+const LOAD_STEPS = ['מתחברים לשרת של הסקר…', 'טוענים את כל הנושאים והשאלות…', 'מצפינים פרטים אישיים…', 'סופרים כמה ענו על כל שאלה…', 'מחדדים את העפרונות…', 'מכינים את העורך…'];
+const SAVE_STEPS = ['בודקים שהשאלון תקין…', 'מוודאים שאף אחד אחר לא שמר בינתיים…', 'כותבים את הנושאים והשאלות…', 'מגהצים את הניסוחים…', 'מעדכנים את טבלת התוצאות…', 'מרעננים את הסקר באתר…'];
 const UI_ICONS = ['arrow-left', 'arrow-right', 'chevron-left', 'chevron-up', 'chevron-down', 'x', 'plus', 'trash-2', 'rotate-ccw'];
 
 const A = {
@@ -87,7 +90,7 @@ function renderLogin(err) {
 }
 
 async function load(pw) {
-  show(el('div', { class: 'center', style: 'padding:80px 0' }, el('div', { class: 'spinner' }), el('p', { class: 'muted' }, 'טוען…')));
+  show(loadingSteps(LOAD_STEPS, { slow: SLOW_MSG }));
   try {
     const res = await apiPost('getAdmin', { password: pw });
     if (!res.success) { sessionStorage.removeItem(PW_KEY); return renderLogin(res.message); }
@@ -158,8 +161,10 @@ async function save(force) {
   tidy(A.survey);
   b.disabled = true;
   b.textContent = 'שומר…';
+  openModal(el('div', { class: 'modal' }, loadingSteps(SAVE_STEPS, { inline: true, slow: SLOW_MSG })));
   try {
     const res = await apiPost('saveSurvey', { password: A.pw, survey: A.survey, rev: A.rev, force: !!force });
+    closeModal();
     if (res.conflict) return showConflict();
     if (!res.success) {
       if (res.errors && res.errors.length) showErrors(res.errors);
@@ -172,6 +177,7 @@ async function save(force) {
     showToast('נשמר. השינויים כבר באתר', 'success');
     rerender();
   } catch (e) {
+    closeModal();
     showToast('השמירה נכשלה. בדקו את החיבור ונסו שוב', 'error');
   } finally {
     b.disabled = false;

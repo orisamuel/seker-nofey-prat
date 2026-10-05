@@ -33,8 +33,12 @@
 <script>
 init();
 
+// מה מוצג בזמן הטעינה. תושבים רואים את זה: הומור כן, הבטחות שלא מתקיימות (למשל "מצפינים") לא
+const LOAD_STEPS = ['אוספים את התשובות…', 'מחשבים ממוצעים…', 'מסתירים שאלות עם מעט עונים, כדי שאף אחד לא יזוהה…', 'מיישרים את העמודות בגרפים…', 'מבריקים את הצבעים…'];
+
 async function init() {
   const app = document.getElementById('app');
+  app.replaceChildren(loadingSteps(LOAD_STEPS, { slow: SLOW_MSG }));
   try {
     if (isLocalMode()) throw new Error('המערכת עדיין לא חוברה לשרת');
     const res = await apiCall('getPublicReport');

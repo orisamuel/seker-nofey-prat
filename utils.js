@@ -90,6 +90,34 @@ function showToast(message, type = 'info', duration = 3500) {
   }, duration);
 }
 
+// ── המתנה ארוכה ──────────────────────────────────────────
+// השרת של גוגל עונה לפעמים רק אחרי עשרות שניות. במקום ספינר שקט: שלבים מתחלפים שמתארים מה באמת
+// קורה, ופס שמתקדם לאט ולא מגיע לסוף עד שהתשובה מגיעה. ככה המתנה ארוכה מרגישה סבירה.
+// opts.slow: משפט למקרה שכבר עברו כל השלבים ועדיין מחכים. opts.inline: גרסה קטנה, בתוך חלון.
+const SLOW_MSG = 'השרת של גוגל לוקח היום את הזמן שלו. עוד רגע…';
+
+function loadingSteps(steps, opts = {}) {
+  let text = el('p', { class: 'ld-text' }, steps[0]);
+  const fill = el('i');
+  const node = el('div', { class: 'ld' + (opts.inline ? ' ld-inline' : ''), role: 'status', 'aria-live': 'polite' },
+    el('div', { class: 'spinner' }), text, el('div', { class: 'ld-bar', 'aria-hidden': 'true' }, fill));
+  const start = Date.now();
+  let ticks = 0;
+  const timer = setInterval(() => {
+    if (++ticks > 2 && !node.isConnected) { clearInterval(timer); return; } // המסך כבר התחלף
+    const secs = (Date.now() - start) / 1000;
+    fill.style.width = Math.max(6, Math.round(92 * (1 - Math.exp(-secs / 9)))) + '%';
+    const step = Math.floor(secs / 2.4);
+    const msg = step < steps.length ? steps[step] : (opts.slow && secs > steps.length * 2.4 + 4 ? opts.slow : null);
+    if (msg && msg !== text.textContent) {
+      const t = el('p', { class: 'ld-text' }, msg);
+      text.replaceWith(t);
+      text = t;
+    }
+  }, 400);
+  return node;
+}
+
 // ── עזרי DOM ─────────────────────────────────────────────
 
 function el(tag, attrs = {}, ...children) {
