@@ -30,6 +30,9 @@
 const D = {
   rows: [], survey: null, raffleCount: 0, respondents: {}, currentTab: 'overview',
   filterDim: '', filter: null,   // פילוח: שאלת פרופיל + ערך נבחר
+  identified: 0,                 // כמה עברו את שלב המייל
+  compareDim: 'about_age', compareQ: '',   // השוואה בין קבוצות
+  openSearch: '', openTopic: '',           // תשובות פתוחות
 };
 
 const MIN_GROUP = 5;   // קבוצה קטנה מזה לא נכנסת להשוואות (רעש סטטיסטי)
@@ -68,7 +71,7 @@ async function load(password) {
     const res = await apiPost('getResults', { password }); // POST: הסיסמה לא נכנסת לכתובת
     if (!res.success) { sessionStorage.removeItem('np_dash_pw'); return renderLogin(res.message); }
     sessionStorage.setItem('np_dash_pw', password);
-    D.rows = res.rows; D.survey = res.survey; D.raffleCount = res.raffleCount || 0;
+    D.rows = res.rows; D.survey = res.survey; D.raffleCount = res.raffleCount || 0; D.identified = res.identified || 0;
     // מיזוג לפי עונה: תשובה אחרונה גוברת. דילוג (_skipped) נספר בנפרד ולא כמענה
     D.respondents = {};
     D.rows.forEach(r => {
@@ -156,12 +159,12 @@ function render() {
   const app = document.getElementById('app');
   const submitted = list.reduce((a, r) => a + Object.keys(r.chapters).length, 0);
 
-  const tabs = el('div', { class: 'pill-tabs' });
+  const tabs = el('div', { class: 'pill-tabs nav' });
   const mkTab = (id, ...label) => el('button', {
     class: 'pill-tab' + (D.currentTab === id ? ' sel' : ''),
     onclick: () => { D.currentTab = id; render(); }
   }, ...label);
-  tabs.append(mkTab('overview', 'מבט על'));
+  tabs.append(mkTab('overview', 'מבט על'), mkTab('compare', 'השוואה בין קבוצות'), mkTab('open', 'תשובות פתוחות'));
   D.survey.chapters.forEach(ch => tabs.append(mkTab(ch.id, icon(ch.icon || 'list-checks'), ch.title)));
 
   const kids = [
@@ -176,6 +179,8 @@ function render() {
   ];
 
   if (D.currentTab === 'overview') kids.push(renderOverview(list));
+  else if (D.currentTab === 'compare') kids.push(renderCompare(list));
+  else if (D.currentTab === 'open') kids.push(renderOpen(list));
   else {
     const ch = D.survey.chapters.find(c => c.id === D.currentTab);
     if (ch) kids.push(renderChapter(ch, list));
@@ -195,7 +200,9 @@ function renderOverview(list) {
     return wrap;
   }
 
-  wrap.append(renderPace(list));
+  wrap.append(renderFunnel(list));
+  wrap.append(el('div', { class: 'dash-grid two' }, renderPace(list), renderHours(list)));
+  wrap.append(renderWho(list));
   wrap.append(renderGaps(list));
 
   // כמה ענו על כל נושא, וכמה סימנו שהוא לא רלוונטי אליהם
@@ -233,6 +240,8 @@ function renderOverview(list) {
       el('div', { class: 'card' }, el('h3', { class: 'mb' }, 'הציונים הגבוהים ביותר: מה עובד'), ...highs.map(scaleRow))
     );
   }
+  const maj = renderMajority(list);
+  if (maj) wrap.append(maj);
   return wrap;
 }
 
@@ -326,6 +335,347 @@ function avgChip(avg, q) {
   const cls = n >= 6 / 9 ? 'avg-good' : n >= 4 / 9 ? 'avg-mid' : 'avg-low';
   const hi = (q && q.max) || 10;
   return el('span', { class: 'avg-chip ' + cls }, avg.toFixed(1) + (hi !== 10 ? '/' + hi : ''));
+}
+
+// ── עזרים לניתוחים ───────────────────────────────────────
+
+const PALETTE = ['#0E6B5B', '#BF5533', '#E2A73E', '#6B7A2E', '#8E5A86', '#3F7A93', '#A39B8B', '#4D5A52'];
+
+const pct = (n, of) => (of ? Math.round((n / of) * 100) : 0);
+
+const shortText = (t, n) => { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+
+function chTitle(id) {
+  const ch = D.survey.chapters.find(c => c.id === id);
+  return ch ? ch.title : id;
+}
+
+// הנושאים בסדר שבו עוברים עליהם בסקר (לפי התחומים), בלי "קצת עליך"
+function topicOrder() {
+  const cats = (D.survey.meta && D.survey.meta.categories) || [];
+  const topics = D.survey.chapters.filter(c => c.id !== 'about');
+  const ordered = cats.flatMap(cat => topics.filter(ch => ch.cat === cat.id));
+  return ordered.concat(topics.filter(ch => !ordered.includes(ch)));
+}
+
+// הנושאים שרלוונטיים לעונה לפי "קצת עליך", כמו בסקר עצמו
+function relevantTopics(r) {
+  return topicOrder().filter(ch => evalCond(ch.showIf, r.answers));
+}
+
+const isDone = (r, chId) => !!(r.chapters[chId] || r.skipped[chId]);
+
+// ── מבט על: משפך ─────────────────────────────────────────
+
+function renderFunnel(list) {
+  const hasAbout = D.survey.chapters.some(c => c.id === 'about');
+  const stat = list.map(r => {
+    const rel = relevantTopics(r);
+    return { r, rel, done: rel.filter(ch => isDone(r, ch.id)).length };
+  });
+  const finished = (s) => s.done === s.rel.length && (!hasAbout || s.r.chapters.about);
+  const steps = [];
+  if (D.identified && !D.filter) steps.push(['נכנסו עם מייל', D.identified]);
+  steps.push(['שמרו נושא אחד לפחות', list.length]);
+  if (hasAbout) steps.push(['מילאו "קצת עליך"', list.filter(r => r.chapters.about).length]);
+  steps.push(['עברו חצי מהנושאים', stat.filter(s => s.rel.length && s.done >= s.rel.length / 2).length]);
+  steps.push(['סיימו הכול', stat.filter(finished).length]);
+  const top = Math.max(1, steps[0][1]);
+
+  const card = el('div', { class: 'card' }, el('h3', { class: 'mb' }, 'מהמייל ועד הסוף'));
+  steps.forEach(([label, n]) => card.append(el('div', { class: 'funnel-row' },
+    el('span', { class: 'f-lbl' }, label),
+    el('span', { class: 'f-track' }, el('span', { class: 'f-fill', style: 'width:' + Math.max(2, pct(n, top)) + '%' })),
+    el('span', { class: 'f-num' }, String(n), el('small', {}, pct(n, top) + '%')))));
+
+  // איפה עוצרים: אצל מי שלא סיים, הנושא הראשון שלא עבר (לפי הסדר בסקר)
+  const stops = {};
+  stat.forEach(s => {
+    if (finished(s)) return;
+    const at = hasAbout && !s.r.chapters.about ? 'about' : (s.rel.find(ch => !isDone(s.r, ch.id)) || {}).id;
+    if (at) stops[at] = (stops[at] || 0) + 1;
+  });
+  const worst = Object.entries(stops).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  if (worst.length) {
+    card.append(el('p', { class: 'small muted mt' }, 'איפה עוצרים: ',
+      ...worst.flatMap(([id, n], i) => [i ? ' · ' : '', el('b', {}, chTitle(id)), ' (' + n + ')'])));
+  }
+  return card;
+}
+
+// ── מבט על: מתי מתחילים ──────────────────────────────────
+
+function renderHours(list) {
+  const h = Array(24).fill(0);
+  list.forEach(r => { h[new Date(r.first).getHours()]++; });
+  const max = Math.max(1, ...h);
+  const peak = h.indexOf(Math.max(...h));
+  const bars = el('div', { class: 'hours' }, ...h.map((n, i) => el('div', { class: 'h-col', title: i + ':00 · ' + n },
+    el('div', { class: 'h-bar', style: 'height:' + (n ? Math.max(5, (n / max) * 74) : 2) + 'px; opacity:' + (n ? 1 : 0.2) }),
+    el('div', { class: 'h-lbl' }, i % 3 === 0 ? String(i) : ''))));
+  return el('div', { class: 'card' }, el('h3', { class: 'mb' }, 'מתי מתחילים'),
+    el('p', { class: 'small muted mb' }, 'לפי השעה שבה כל עונה התחיל. הכי עמוס סביב ' + peak + ':00, שעה טובה לתזכורת.'), bars);
+}
+
+// ── מבט על: מי ענה ───────────────────────────────────────
+// התפלגות הפרופיל, כדי לראות אם קבוצה ביישוב חסרה בסקר
+
+function renderWho(list) {
+  const card = el('div', { class: 'card' }, el('h3', { class: 'mb' }, 'מי ענה'));
+  profileDims().forEach(d => {
+    const answered = list.filter(r => answersOf(d.id, [r]).length);
+    if (!answered.length) return;
+    const counts = d.opts.map(v => answered.filter(r => inGroup(r, d.id, v)).length);
+    const row = el('div', { class: 'who-row' }, el('div', { class: 'who-lbl' }, dimLabel(d), el('small', {}, answered.length + ' ענו')));
+    if (d.type === 'radio') {
+      row.append(el('div', { class: 'stack' }, ...d.opts.map((v, i) => counts[i]
+        ? el('i', { style: 'width:' + (counts[i] / answered.length) * 100 + '%; background:' + PALETTE[i % PALETTE.length], title: v + ': ' + counts[i] })
+        : null)));
+    } else {
+      // בחירה מרובה (למשל ילדים בבית): כל אפשרות בנפרד, כי אפשר לסמן כמה
+      row.append(el('div', { class: 'mini-bars' }, ...d.opts.map((v, i) => el('div', { class: 'mini', title: v + ': ' + counts[i] },
+        el('i', { style: 'width:' + pct(counts[i], answered.length) + '%; background:' + PALETTE[i % PALETTE.length] })))));
+    }
+    row.append(el('div', { class: 'legend' }, ...d.opts.map((v, i) =>
+      el('span', { style: '--c:' + PALETTE[i % PALETTE.length] }, v + ' ', el('b', {}, pct(counts[i], answered.length) + '%')))));
+    card.append(row);
+  });
+  return card;
+}
+
+// ── מבט על: מה הרוב אומר ─────────────────────────────────
+// התשובה המובילה בכל שאלת בחירה. "דעות חלוקות": אין רוב, והשנייה קרובה
+
+function renderMajority(list) {
+  const rows = [];
+  topicOrder().forEach(ch => ch.questions.forEach(q => {
+    if (q.type !== 'radio' && q.type !== 'checkbox') return;
+    const vals = answersOf(q.id, list);
+    if (vals.length < 3) return;
+    const counts = {};
+    vals.forEach(v => (Array.isArray(v) ? v : [v]).forEach(o => {
+      const k = String(o).startsWith('אחר: ') ? 'אחר' : String(o);
+      counts[k] = (counts[k] || 0) + 1;
+    }));
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    const share = sorted[0][1] / vals.length;
+    const second = sorted[1] ? sorted[1][1] / vals.length : 0;
+    const split = q.type === 'radio' && share < 0.5 && second >= 0.3;
+    rows.push(el('div', { class: 'maj-row' },
+      el('div', { class: 'maj-q' }, el('small', {}, ch.title), shortText(q.text, 95)),
+      el('div', { class: 'maj-a' },
+        el('span', { class: 'maj-lead' }, shortText(sorted[0][0], 42)),
+        el('span', { class: 'maj-bar' }, el('i', { style: 'width:' + Math.round(share * 100) + '%' })),
+        el('span', { class: 'maj-pct' }, Math.round(share * 100) + '%'),
+        split ? el('span', { class: 'tag split' }, 'דעות חלוקות') : null,
+        el('small', { class: 'muted' }, vals.length + ' ענו'))));
+  }));
+  if (!rows.length) return null;
+  return el('div', { class: 'card' }, el('h3', { class: 'mb' }, 'מה הרוב אומר'),
+    el('p', { class: 'small muted mb' }, 'התשובה המובילה בכל שאלת בחירה. בבחירה מרובה: כמה מהעונים סימנו אותה.'), ...rows);
+}
+
+// ── השוואה בין קבוצות ────────────────────────────────────
+
+// לפי מה אפשר להשוות: "קצת עליך", ועוד שאלות בחירה אחת עם עד 6 תשובות (למשל באיזה שער יוצאים)
+function compareDims() {
+  const others = topicOrder().flatMap(ch => ch.questions
+    .filter(q => q.type === 'radio' && q.opts && q.opts.length >= 2 && q.opts.length <= 6)
+    .map(q => Object.assign({ chTitle: ch.title }, q)));
+  return profileDims().concat(others);
+}
+
+function renderCompare(list) {
+  const dims = compareDims();
+  if (!dims.length) return el('div', { class: 'card muted' }, 'אין שאלות שאפשר להשוות לפיהן');
+  if (!dims.some(d => d.id === D.compareDim)) D.compareDim = dims[0].id;
+  const d = dims.find(x => x.id === D.compareDim);
+  const groups = [{ label: 'כולם', list }].concat(d.opts.map(v => ({ label: v, list: list.filter(r => inGroup(r, d.id, v)) })));
+
+  const sel = el('select', { class: 'txt-input', style: 'max-width:360px', 'aria-label': 'להשוות לפי', onchange: e => { D.compareDim = e.target.value; render(); } },
+    el('optgroup', { label: 'קצת עליך' }, ...dims.filter(x => !x.chTitle).map(x => el('option', { value: x.id }, dimLabel(x)))),
+    el('optgroup', { label: 'שאלות בסקר' }, ...dims.filter(x => x.chTitle).map(x => el('option', { value: x.id }, x.chTitle + ': ' + shortText(x.text, 55)))));
+  sel.value = D.compareDim;
+
+  return el('div', {},
+    el('div', { class: 'card', style: 'padding:14px 16px' },
+      el('div', { style: 'display:flex; align-items:center; gap:10px; flex-wrap:wrap' }, el('b', {}, 'להשוות לפי'), sel)),
+    heatCard(groups),
+    choiceCompareCard(groups, d));
+}
+
+// מפת חום: כל שאלות הסולם מול הקבוצות. צבע לפי מיקום בטווח הסולם; קבוצה קטנה מעומעמת
+function heatCard(groups) {
+  const head = el('tr', {}, el('th', {}), ...groups.map(g => el('th', {}, g.label, el('small', {}, g.list.length + ' עונים'))));
+  const rows = [];
+  topicOrder().forEach(ch => ch.questions.forEach(q => {
+    if (q.type !== 'scale') return;
+    rows.push(el('tr', {}, el('td', { class: 'lbl' }, shortText(q.text, 64), el('small', {}, ch.title)), ...groups.map(g => heatCell(q, g.list))));
+    if (q.dontKnow) rows.push(el('tr', {}, el('td', { class: 'lbl' }, 'ענו "' + DONT_KNOW + '"', el('small', {}, ch.title)), ...groups.map(g => dkCell(q, g.list))));
+  }));
+  return el('div', { class: 'card' }, el('h3', { class: 'mb' }, 'הסולמות לפי קבוצה'),
+    el('p', { class: 'small muted mb' }, 'ממוצע בכל קבוצה: ירוק גבוה, צהוב באמצע, אדום נמוך. מעומעם: פחות מ-' + MIN_GROUP + ' עונים.'),
+    el('div', { class: 'tbl-wrap' }, el('table', { class: 'heat' }, el('thead', {}, head), el('tbody', {}, ...rows))));
+}
+
+function heatCell(q, list) {
+  const nums = answersOf(q.id, list).map(Number).filter(n => !isNaN(n));
+  if (!nums.length) return el('td', { class: 'none' }, '·');
+  const avg = nums.reduce((a, b) => a + b, 0) / nums.length;
+  const n = normScore(avg, q);
+  const cls = n >= 6 / 9 ? 'avg-good' : n >= 4 / 9 ? 'avg-mid' : 'avg-low';
+  return el('td', { class: cls + (nums.length < MIN_GROUP ? ' few' : ''), title: nums.length + ' עונים' }, avg.toFixed(1));
+}
+
+// תא באחוזים: ככל שהאחוז גבוה יותר, הרקע כהה יותר
+function pctCell(n, of) {
+  if (!of) return el('td', { class: 'none' }, '·');
+  const p = n / of;
+  return el('td', {
+    class: 'pct-cell' + (of < MIN_GROUP ? ' few' : ''), title: n + ' מתוך ' + of,
+    style: 'background:rgba(14,107,91,' + (0.05 + 0.6 * p).toFixed(2) + ');' + (p > 0.55 ? 'color:#fff' : ''),
+  }, pct(n, of) + '%');
+}
+
+function dkCell(q, list) {
+  const vals = answersOf(q.id, list);
+  return pctCell(vals.filter(v => v === DONT_KNOW).length, vals.length);
+}
+
+// שאלת בחירה מול הקבוצות: כמה אחוז מכל קבוצה סימנו כל תשובה
+function choiceCompareCard(groups, dim) {
+  const qs = topicOrder().flatMap(ch => ch.questions.filter(q => (q.type === 'radio' || q.type === 'checkbox') && q.id !== dim.id).map(q => ({ ch, q })));
+  if (!qs.length) return null;
+  if (!qs.some(x => x.q.id === D.compareQ)) D.compareQ = qs[0].q.id;
+  const { ch, q } = qs.find(x => x.q.id === D.compareQ);
+  const sel = el('select', { class: 'txt-input', 'aria-label': 'שאלה', onchange: e => { D.compareQ = e.target.value; render(); } },
+    ...topicOrder().map(c => {
+      const items = qs.filter(x => x.ch === c);
+      return items.length ? el('optgroup', { label: c.title }, ...items.map(x => el('option', { value: x.q.id }, shortText(x.q.text, 75)))) : null;
+    }));
+  sel.value = D.compareQ;
+  const opts = (q.opts || []).concat(q.other ? ['אחר'] : []);
+  const chose = (v, o) => (Array.isArray(v) ? v : [v]).some(x => (o === 'אחר' ? String(x).startsWith('אחר: ') : x === o));
+  const head = el('tr', {}, el('th', {}), ...groups.map(g => el('th', {}, g.label, el('small', {}, answersOf(q.id, g.list).length + ' ענו'))));
+  const rows = opts.map(o => el('tr', {}, el('td', { class: 'lbl' }, shortText(o, 60)), ...groups.map(g => {
+    const vals = answersOf(q.id, g.list);
+    return pctCell(vals.filter(v => chose(v, o)).length, vals.length);
+  })));
+  return el('div', { class: 'card' }, el('h3', { class: 'mb' }, 'שאלת בחירה לפי קבוצה'), sel,
+    el('p', { class: 'small muted mt mb' }, ch.title + (q.type === 'checkbox' ? '. בחירה מרובה: כל שורה נספרת בנפרד.' : '')),
+    el('div', { class: 'tbl-wrap' }, el('table', { class: 'heat' }, el('thead', {}, head), el('tbody', {}, ...rows))));
+}
+
+// ── תשובות פתוחות: חיפוש ומילים שחוזרות ───────────────────
+
+// כל הטקסט החופשי, כולל "אחר: ..." בשאלות בחירה. בלי שמות מ"קצת עליך"
+function openAnswers(list) {
+  const out = [];
+  topicOrder().forEach(ch => withMore(ch).forEach(q => {
+    list.forEach(r => {
+      const v = r.answers[q.id];
+      if (v === undefined || v === null || v === '') return;
+      if (q.type === 'text' || q.type === 'textarea') out.push({ ch, q, t: String(v) });
+      else if (q.other) (Array.isArray(v) ? v : [v]).forEach(x => { if (String(x).startsWith('אחר: ') && String(x).length > 5) out.push({ ch, q, t: String(x).slice(5) }); });
+    });
+  }));
+  return out;
+}
+
+const STOP_WORDS = new Set(('של את על עם זה זו זאת הוא היא הם הן אני אנחנו אתם אתן יש אין לא כן גם רק כל מה מי איך למה כי אם או אבל כמו ' +
+  'יותר פחות מאוד הרבה קצת עוד כבר היה היו יהיה להיות אפשר צריך צריכים צריכה שלא שיש אחד אחת שני שתי יישוב תושבים תושב ' +
+  'דבר דברים ממש פעם כדי בין אצל אותו אותה אותם לכם להם לנו שלי שלך שלנו שלהם זמן טוב טובה חושב חושבת נראה עכשיו שהם שזה ' +
+  'ליד תודה סקר חשוב').split(' '));
+
+// מילה "ריקה" גם עם תחילית: "ביישוב", "לתושבים"
+function isStopWord(w) {
+  for (let s = w, i = 0; i < 3; i++) {
+    if (STOP_WORDS.has(s)) return true;
+    const t = s.replace(/^[והבלמשכ]/, '');
+    if (t === s || t.length < 2) break;
+    s = t;
+  }
+  return false;
+}
+
+// מילים וצירופים שחוזרים. צירוף קבוע ("בית הכנסת") מחליף את המילים שלו,
+// ו"והגינון" נספר כ"גינון" אם גם "גינון" מופיע
+function topWords(texts, n) {
+  const docs = texts.map(t => (t.toLowerCase().match(/[א-תa-z0-9"״׳']+/g) || []).map(w => w.replace(/["״׳']/g, '')));
+  const uni = {}, bi = {};
+  docs.forEach(ws => ws.forEach((w, i) => {
+    if (w.length >= 3 && !isStopWord(w)) uni[w] = (uni[w] || 0) + 1;
+    const prev = ws[i - 1];
+    if (prev && prev.length >= 2 && w.length >= 2 && !isStopWord(prev) && !isStopWord(w)) bi[prev + ' ' + w] = (bi[prev + ' ' + w] || 0) + 1;
+  }));
+  const out = {};
+  Object.entries(bi).sort((a, b) => b[1] - a[1]).forEach(([p, c]) => {
+    const [a, b] = p.split(' ');
+    if (c >= 3 && (uni[a] || 0) >= c * 0.5 && (uni[b] || 0) >= c * 0.5) {
+      out[p] = c;
+      uni[a] -= c;
+      uni[b] -= c;
+    }
+  });
+  Object.keys(uni).forEach(w => {
+    let base = w;
+    for (let i = 0; i < 2; i++) {
+      const s = base.replace(/^[והבלמשכ]/, '');
+      if (s !== base && s.length >= 3 && uni[s] !== undefined) base = s; else break;
+    }
+    out[base] = (out[base] || 0) + uni[w];
+  });
+  return Object.entries(out).filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]).slice(0, n);
+}
+
+function highlight(text, term) {
+  if (!term) return [text];
+  const i = text.toLowerCase().indexOf(term.toLowerCase());
+  if (i === -1) return [text];
+  return [text.slice(0, i), el('mark', {}, text.slice(i, i + term.length)), ...highlight(text.slice(i + term.length), term)];
+}
+
+function renderOpen(list) {
+  const all = openAnswers(list);
+  const results = el('div', {});
+  const count = el('p', { class: 'small muted mt' });
+  const chips = el('div', { class: 'pill-tabs', style: 'margin:8px 0 0' });
+  const search = el('input', { class: 'txt-input', type: 'search', placeholder: 'חיפוש, למשל: חניה, תאורה, כלבים', 'aria-label': 'חיפוש בתשובות' });
+  search.value = D.openSearch;
+  const perTopic = topicOrder().map(ch => [ch, all.filter(a => a.ch === ch).length]).filter(([, n]) => n);
+  const topicSel = el('select', { class: 'txt-input', 'aria-label': 'נושא' },
+    el('option', { value: '' }, 'כל הנושאים (' + all.length + ')'),
+    ...perTopic.map(([ch, n]) => el('option', { value: ch.id }, ch.title + ' (' + n + ')')));
+  topicSel.value = D.openTopic;
+  const scope = () => (D.openTopic ? all.filter(a => a.ch.id === D.openTopic) : all);
+
+  const drawChips = () => chips.replaceChildren(...topWords(scope().map(a => a.t), 18).map(([w, n]) =>
+    el('button', { class: 'pill-tab' + (D.openSearch === w ? ' sel' : ''), onclick: () => { D.openSearch = D.openSearch === w ? '' : w; search.value = D.openSearch; drawChips(); drawResults(); } },
+      w, el('span', { style: 'opacity:.7' }, ' ' + n))));
+
+  const drawResults = () => {
+    const term = D.openSearch.trim().toLowerCase();
+    const shown = scope().filter(a => !term || a.t.toLowerCase().includes(term));
+    count.textContent = shown.length + ' תשובות' + (term ? ' עם "' + D.openSearch.trim() + '"' : '');
+    results.replaceChildren();
+    let curCh = null, curQ = null, card = null;
+    shown.forEach(a => {
+      if (a.ch !== curCh) { curCh = a.ch; curQ = null; results.append(el('div', { class: 'chapters-head' }, el('h2', { style: 'font-size:34px' }, icon(a.ch.icon || 'list-checks'), a.ch.title))); }
+      if (a.q !== curQ) { curQ = a.q; card = el('div', { class: 'card' }, el('p', { class: 'q-text mb' }, a.q.text)); results.append(card); }
+      card.append(el('div', { class: 'open-answer' }, ...highlight(a.t, D.openSearch.trim())));
+    });
+    if (!shown.length) results.append(el('div', { class: 'card center muted' }, term ? 'אין תשובות עם "' + D.openSearch.trim() + '"' : 'אין עדיין תשובות פתוחות'));
+  };
+
+  search.addEventListener('input', () => { D.openSearch = search.value; drawChips(); drawResults(); });
+  topicSel.addEventListener('change', () => { D.openTopic = topicSel.value; drawChips(); drawResults(); });
+  drawChips();
+  drawResults();
+  return el('div', {},
+    el('div', { class: 'card' },
+      el('div', { class: 'open-controls' }, search, topicSel),
+      el('p', { class: 'small muted mt' }, 'מילים שחוזרות (לחיצה מחפשת):'), chips, count),
+    results);
 }
 
 // ── נושא בודד ────────────────────────────────────────────

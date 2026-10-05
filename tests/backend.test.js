@@ -198,6 +198,7 @@ r = post({ action: 'getResults', password: '' });
 check('results empty password', !r.success);
 r = post({ action: 'getResults', password: pw() });
 check('results ok', r.success && r.raffleCount === 2, r.message);
+check('results: how many passed the email step', r.identified === SS.getSheetByName('מיילים').rows.length - 1 && r.identified > 0, r.identified);
 check('results exclude discarded B', !r.rows.some(x => x.rid === B));
 check('results include A', r.rows.some(x => x.rid === A));
 

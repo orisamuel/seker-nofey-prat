@@ -434,6 +434,7 @@ function goChapter(chId) {
   const container = el('div', {});
 
   container.append(
+    el('button', { class: 'back-pill', onclick: goCategories }, icon('arrow-right'), 'חזרה לכל התחומים'),
     el('div', { class: 'chapter-header' },
       el('span', { class: 'ch-icon' }, icon(ch.icon || 'list-checks')),
       el('div', {},

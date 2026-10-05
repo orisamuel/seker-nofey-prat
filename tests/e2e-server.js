@@ -4,6 +4,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { createGas } = require('./mock-gas.js');
+const { fillDemo, loadSurvey } = require('./demo-data.js');
 
 const ROOT = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const PORT = Number(process.argv[3] || 5178);
@@ -27,6 +28,17 @@ http.createServer((req, res) => {
       // השהיה קטנה, כמו Apps Script אמיתי
       setTimeout(() => { res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); res.end(out.getContent()); }, 350);
     });
+    return;
+  }
+
+  // נתוני דמה לבדיקת הדשבורד: /__demo?n=80 (שומר את השאלון מהקוד ומוסיף עונים)
+  if (url.pathname === '/__demo') {
+    const n = Math.min(500, Number(url.searchParams.get('n')) || 80);
+    const pw = g.SS.getSheetByName('הגדרות').rows.find(r => r[0] === 'dashboardPassword')[1];
+    g.ctx.saveSurvey(pw, JSON.stringify(loadSurvey(ROOT)), '', true);
+    fillDemo(g, ROOT, n);
+    res.writeHead(200, { ...cors, 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ ok: true, n }));
     return;
   }
 
