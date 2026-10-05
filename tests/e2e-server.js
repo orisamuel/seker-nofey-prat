@@ -30,13 +30,6 @@ http.createServer((req, res) => {
     return;
   }
 
-  // המיילים ש"נשלחו" (קישורי "אמשיך אחר כך"), לבדיקה
-  if (url.pathname === '/__mails') {
-    res.writeHead(200, { ...cors, 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify(g.mails));
-    return;
-  }
-
   // מבט פנימי על הגיליון המדומה, לבדיקה
   if (url.pathname === '/__sheet') {
     const name = url.searchParams.get('name');

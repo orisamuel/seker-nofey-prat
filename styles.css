@@ -608,6 +608,48 @@ textarea.txt-input { min-height: 104px; resize: vertical; }
 
 .num-input { max-width: 130px; text-align: center; font-weight: 600; }
 
+/* שאלות חובה: כוכבית, ומסגרת אדומה כשמנסים להמשיך בלי לענות */
+.q-req { color: var(--terra); font-weight: 700; }
+
+.req-legend { font-size: 13px; color: var(--muted); margin: -2px 2px 10px; }
+
+.q-err { display: none; margin-top: 10px; font-size: 14px; font-weight: 600; color: var(--danger); }
+
+.q-card.q-missing { box-shadow: inset 0 0 0 2px var(--danger), var(--shadow-sm); }
+
+.q-card.q-missing .q-err { display: block; }
+
+/* נושא שנשמר ממכשיר אחר */
+.ch-note {
+  display: flex; gap: 10px; align-items: flex-start;
+  background: var(--paper-deep);
+  border-radius: var(--r-md);
+  padding: 12px 15px;
+  margin-bottom: 12px;
+  font-size: 14.5px; line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+.ch-note svg.ic, .email-privacy svg.ic { flex: none; margin-top: 3px; color: var(--teal); }
+
+/* מסך המייל */
+.email-input { text-align: center; font-size: 17px; }
+
+.email-privacy { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; font-size: 14px; line-height: 1.45; color: var(--muted); }
+
+.email-chip {
+  text-align: center; font-weight: 600; color: var(--ink);
+  background: var(--paper); border-radius: var(--r-sm);
+  padding: 10px 12px; word-break: break-all;
+}
+
+/* מסך התחומים: מי ממלא עכשיו */
+.who { text-align: center; font-size: 13.5px; line-height: 1.6; color: var(--muted); margin-top: 18px; }
+
+.who bdi { color: var(--ink-soft); font-weight: 500; }
+
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
 /* דירוג בגרירה (נתמך, לא בשימוש בשאלון הנוכחי) */
 .rank-list { display: grid; gap: 8px; counter-reset: rank; }
 

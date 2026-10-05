@@ -32,8 +32,13 @@ for (const ch of S.chapters) {
     if (q.opts && new Set(q.opts).size !== q.opts.length) errors.push('duplicate option in ' + q.id);
     if (q.opts && q.opts.includes('אחר') && q.other) errors.push('both other:true and "אחר" option in ' + q.id);
     if (q.exclusive && !q.opts.includes(q.exclusive)) errors.push('exclusive not in opts ' + q.id);
+    if ('required' in q && typeof q.required !== 'boolean') errors.push('required must be true/false ' + q.id);
   }
 }
+// הפרטים הדמוגרפיים חובה, השם רשות
+const about = S.chapters.find(c => c.id === 'about');
+if (!about || about.questions.filter(q => q.required).length < 4) errors.push('about: main demographics should be required');
+if (about && about.questions.some(q => q.id === 'about_name' && q.required)) errors.push('about_name must stay optional');
 
 function checkCond(where, cond) {
   if (!cond) return;

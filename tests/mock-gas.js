@@ -92,7 +92,6 @@ const props = {};
 const cache = {};
 const triggers = [];
 const logs = [];
-const mails = [];  // מיילים ש-MailApp "שלח"
 
 const ctx = {
   SpreadsheetApp: { openById: () => SS },
@@ -104,7 +103,6 @@ const ctx = {
     DigestAlgorithm: { SHA_256: 'SHA_256' },
     Charset: { UTF_8: 'UTF_8' },
   },
-  MailApp: { sendEmail: (m) => { mails.push(m); }, getRemainingDailyQuota: () => 1500 },
   CacheService: { getScriptCache: () => ({ get: k => (k in cache ? cache[k] : null), put: (k, v) => { cache[k] = v; }, remove: k => { delete cache[k]; } }) },
   PropertiesService: { getScriptProperties: () => ({ getProperty: k => (k in props ? props[k] : null), setProperty: (k, v) => { props[k] = v; } }) },
   ScriptApp: {
@@ -118,6 +116,6 @@ const ctx = {
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync(path.join(ROOT, 'appscript.gs'), 'utf8'), ctx);
 
-return { ctx, SS, props, cache, triggers, logs, mails };
+return { ctx, SS, props, cache, triggers, logs };
 }
 module.exports = { createGas };

@@ -1,6 +1,6 @@
 // ============================================================
 // סקר התושבים — נופי פרת · Google Apps Script Backend
-// הגיליון הוא מסד הנתונים: פרקים, שאלות, תשובות, הגרלה, הגדרות
+// הגיליון הוא מסד הנתונים: פרקים, שאלות, תשובות, הגרלה, הגדרות, מיילים (מוצפנים)
 // ============================================================
 //
 // פריסה (פירוט מלא ב-CLAUDE.md, עם clasp מהמחשב של אורי):
@@ -23,21 +23,16 @@ const T_RAW = 'תשובות גולמי';
 const T_FLAT = 'תוצאות';
 const T_RAFFLE = 'הגרלה';
 const T_SETTINGS = 'הגדרות';
-const T_LINKS = 'קישורי המשך';
+const T_EMAILS = 'מיילים';
 
 // Schema: זמן(0), קוד עונה(1), פרק(2), תשובות JSON(3) — append-only
 const RAW_HEADERS = ['זמן', 'קוד עונה', 'פרק', 'תשובות (JSON)'];
 // Schema: שם(0), טלפון(1) — בלי זמן ובלי קוד עונה, ממוין לפי שם (אי אפשר לקשר לתשובות)
 const RAFFLE_HEADERS = ['שם', 'טלפון'];
 
-// Schema: זמן(0), טוקן מוצפן(1), קוד עונה(2). המייל עצמו לא נשמר בשום מקום
-const LINK_HEADERS = ['זמן', 'טוקן (מוצפן)', 'קוד עונה'];
-
-// "אמשיך אחר כך": הקישור נבנה תמיד מהכתובת הזו ולא ממה שהדפדפן שולח (אחרת אפשר לשלוח בשמנו קישור זדוני)
-const SITE_URL = 'https://sekernofey.online/';
-const LINK_DAYS = 45;                // תוקף קישור
-const MAX_LINKS_PER_EMAIL_HOUR = 3;  // הגנה מהצפת תיבה של מישהו
-const MAX_LINKS_PER_HOUR = 120;      // הגנה מניצול לרעה ומכסת המיילים היומית
+// Schema: זמן(0), מייל מוצפן(1), קוד עונה(2). הכתובת עצמה לא נשמרת בשום מקום
+const EMAIL_HEADERS = ['זמן', 'מייל (מוצפן)', 'קוד עונה'];
+const MAX_NEW_EMAILS_PER_HOUR = 400; // הגנה מהצפה של הטאב
 
 // "פרק" מיוחד בטאב הגולמי: העונה לחץ "התחלה מחדש", כל התשובות שלו לא נספרות
 const DISCARD_CH = '_בוטל';
@@ -97,7 +92,8 @@ function withLock(fn) {
 function settingsDefaults() {
   return [
     ['surveyOpen', 'כן', 'האם הסקר פתוח למענה (כן/לא)'],
-    ['dashboardPassword', Utilities.getUuid().replace(/-/g, '').slice(0, 10), 'סיסמת הצוות לדשבורד ולסנכרון השאלות. נוצרה אקראית, אפשר להחליף'],
+    // מתחילה באותיות: סיסמה שכולה ספרות (או "123e45") הגיליון הופך למספר, ואז היא לא תואמת למה שמקלידים
+    ['dashboardPassword', 'np' + Utilities.getUuid().replace(/-/g, '').slice(0, 8), 'סיסמת הצוות לדשבורד ולסנכרון השאלות. נוצרה אקראית, אפשר להחליף'],
     ['publicReport', 'לא', 'האם הדוח הציבורי פעיל (כן/לא)'],
   ];
 }
@@ -127,13 +123,38 @@ function upsertSetting(sheet, key, value, note) {
   sheet.appendRow([key, value, note || '']);
 }
 
-function sha256Hex(str) {
-  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, str, Utilities.Charset.UTF_8)
-    .map(function (b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join('');
-}
-
 function validEmail(e) {
   return e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
+}
+
+// ב-Gmail נקודות ו"+תוספת" מגיעות לאותה תיבה, אז הן לא פותחות סקר נוסף
+function normEmail(email) {
+  email = String(email || '').trim().toLowerCase();
+  if (!validEmail(email)) return null;
+  const at = email.lastIndexOf('@');
+  let user = email.slice(0, at), domain = email.slice(at + 1);
+  if (domain === 'gmail.com' || domain === 'googlemail.com') {
+    user = user.split('+')[0].replace(/\./g, '');
+    domain = 'gmail.com';
+  }
+  return user ? user + '@' + domain : null;
+}
+
+// המפתח הסודי של המיילים יושב בהגדרות הסקריפט, לא בגיליון: מי שרואה את הגיליון
+// לא יכול לחשב את הקוד של כתובת מסוימת ולבדוק אם היא ענתה
+function emailSecret() {
+  const props = PropertiesService.getScriptProperties();
+  let secret = props.getProperty('EMAIL_SECRET');
+  if (!secret) {
+    secret = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
+    props.setProperty('EMAIL_SECRET', secret);
+  }
+  return secret;
+}
+
+function emailKey(norm) {
+  return Utilities.computeHmacSha256Signature(norm, emailSecret(), Utilities.Charset.UTF_8)
+    .map(function (b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join('');
 }
 
 // ── טלפון (להגרלה) ─────────────────────────────────────
@@ -204,8 +225,8 @@ function setup() {
   const settings = getSettings();
   ensureSheet(T_RAW, RAW_HEADERS);
   ensureSheet(T_RAFFLE, RAFFLE_HEADERS);
-  ensureSheet(T_LINKS, LINK_HEADERS);
-  Logger.log('מכסת מיילים שנשארה היום: ' + MailApp.getRemainingDailyQuota());
+  ensureSheet(T_EMAILS, EMAIL_HEADERS);
+  emailSecret();
   const hasWarm = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'keepWarm'; });
   if (!hasWarm) ScriptApp.newTrigger('keepWarm').timeBased().everyMinutes(10).create();
   Logger.log('מוכן. סיסמת הצוות (גם בטאב "הגדרות"): ' + settings.dashboardPassword);
@@ -219,7 +240,7 @@ function keepWarm() { Logger.log('warm ' + new Date().toISOString()); }
 // ============================================================
 
 const CHAPTER_HEADERS = ['id', 'כותרת', 'אייקון', 'תיאור', 'תנאי הצגה', 'שער', 'פעיל', 'סדר', 'קטגוריה', 'פתיח', 'סיום'];
-const QUESTION_HEADERS = ['פרק', 'id', 'סוג', 'שאלה', 'עזרה', 'אפשרויות ( | )', 'אחר', 'בלעדי', 'מינ', 'מקס', 'תווית מינ', 'תווית מקס', 'תנאי הצגה', 'פעיל', 'סדר'];
+const QUESTION_HEADERS = ['פרק', 'id', 'סוג', 'שאלה', 'עזרה', 'אפשרויות ( | )', 'אחר', 'בלעדי', 'מינ', 'מקס', 'תווית מינ', 'תווית מקס', 'תנאי הצגה', 'פעיל', 'סדר', 'חובה'];
 
 // זריעת המבנה מהלקוח (setup.html שולח את survey-data.js המלא).
 // בפעם הראשונה (טאב השאלות ריק) אין צורך בסיסמה; אחר כך חובה, כי הזריעה דורסת עריכות בגיליון.
@@ -255,6 +276,7 @@ function seedSurvey(surveyJson, password) {
         q.minLabel || '', q.maxLabel || '',
         condToString(q.showIf),
         'כן', qi + 1,
+        q.required ? 'כן' : '',
       ]);
     });
   });
@@ -268,7 +290,7 @@ function seedSurvey(surveyJson, password) {
   // הכנת שאר הטאבים + כותרות הטבלה השטוחה
   ensureSheet(T_RAW, RAW_HEADERS);
   ensureSheet(T_RAFFLE, RAFFLE_HEADERS);
-  ensureSheet(T_LINKS, LINK_HEADERS);
+  ensureSheet(T_EMAILS, EMAIL_HEADERS);
   writeGuideSheet();
   rebuildFlatHeaders();
 
@@ -294,6 +316,7 @@ function writeGuideSheet() {
     ['סולם', 'עמודות מינ/מקס קובעות את הטווח (למשל 1 ו-10, או 1 ו-7) + תווית מינ/תווית מקס לטקסט בקצוות.'],
     ['בחירה מרובה', 'מקס = מספר הבחירות המרבי (למשל 3 בשאלת "בחר 3 נושאים"). ריק = בלי הגבלה.'],
     ['בלעדי', 'בבחירה מרובה: אפשרות שמבטלת את כל השאר (למשל "אין ילדים בבית").'],
+    ['חובה', 'כן = אי אפשר להמשיך בלי לענות (כך מסומנים הפרטים הדמוגרפיים ב"קצת עליך"). ריק = רשות.'],
     [''],
     ['תנאי הצגה', 'מציג שאלה/פרק רק לפי תשובה קודמת. תחביר: id = ערך  (או כמה ערכים עם | )'],
     ['דוגמה 1', 'syn_teacher = מישהו מהיישוב   ← מוצג רק למי שבחר באפשרות הזו'],
@@ -305,6 +328,7 @@ function writeGuideSheet() {
     [''],
     ['הגדרות (טאב "הגדרות")', 'surveyOpen=לא סוגר את הסקר · publicReport=כן מפרסם את הדוח הציבורי · dashboardPassword: סיסמת הצוות'],
     ['תוצאות', 'טאב "תוצאות": שורה לכל עונה, עמודה לכל שאלה. טאב "תשובות גולמי": גיבוי מלא, לא לערוך.'],
+    ['מיילים', 'טאב "מיילים": קוד מוצפן לכל כתובת (לא הכתובת עצמה), כדי שכל אחד ימלא פעם אחת וימשיך מכל מכשיר. לא לערוך.'],
   ];
   sheet.getRange(1, 1, rows.length, 2).setValues(rows.map(function (r) { return [r[0] || '', r[1] || '']; }));
   sheet.setColumnWidth(1, 220);
@@ -321,6 +345,8 @@ function loadSurvey() {
   const meta = parseJsonSafe(settings.meta, {});
 
   const qData = qSheet.getDataRange().getValues();
+  // עמודת "חובה" נוספה ב-10/2026. בגיליון שנזרע לפניה לא מחזירים כלום, והאתר לוקח את זה מ-survey-data.js
+  const hasRequired = String(qData[0][15] || '').trim() === 'חובה';
   const byChapter = {};
   for (let i = 1; i < qData.length; i++) {
     const r = qData[i];
@@ -337,6 +363,7 @@ function loadSurvey() {
     if (r[11]) q.maxLabel = String(r[11]);
     const cond = parseCondition(String(r[12]));
     if (cond) q.showIf = cond;
+    if (hasRequired) q.required = String(r[15]).trim() === 'כן';
     const chId = String(r[0]).trim();
     (byChapter[chId] = byChapter[chId] || []).push(q);
   }
@@ -498,7 +525,7 @@ function discard(rid) {
   }
 }
 
-// כל הפרקים שהוגשו עבור עונה (שימוש פנימי: אימות ההגרלה, קישור המשך)
+// כל הפרקים שהוגשו עבור עונה (שימוש פנימי: אימות ההגרלה)
 function resume(rid) {
   try {
     rid = normRid(rid);
@@ -522,77 +549,82 @@ function resume(rid) {
 }
 
 // ============================================================
-// "אמשיך אחר כך": קישור אישי במייל
-// נשמר רק hash של הטוקן וקוד העונה. בלי הקישור עצמו אי אפשר לטעון תשובות.
+// מייל = זהות: כתובת אחת, סקר אחד, והמשך מכל מכשיר. לא שולחים מיילים.
+// כתובת חדשה נקשרת לקוד העונה של המכשיר. כתובת מוכרת ממכשיר אחר מחזירה את קוד העונה שלה
+// ואת רשימת הנושאים שכבר נשמרו, בלי התשובות: מי שמקליד מייל של מישהו אחר לא רואה מה הוא ענה.
 // ============================================================
 
-function sendResumeLink(email, rid) {
+function identify(email, rid) {
   try {
-    email = String(email || '').trim().toLowerCase();
+    const norm = normEmail(email);
     rid = normRid(rid);
-    if (!rid || !validEmail(email)) return { success: false, message: 'בדקו את כתובת המייל' };
+    if (!norm) return { success: false, message: 'בדקו את כתובת המייל' };
+    if (!rid) return { success: false, message: 'קוד עונה לא תקין' };
 
-    const cache = CacheService.getScriptCache();
-    const ek = 'mail_' + sha256Hex(email).slice(0, 40);
-    const perEmail = Number(cache.get(ek) || 0);
-    if (perEmail >= MAX_LINKS_PER_EMAIL_HOUR) return { success: false, message: 'כבר שלחנו לכתובת הזו כמה קישורים. בדקו את תיבת המייל, גם בספאם' };
-    const perHour = Number(cache.get('mail_hour') || 0);
-    if (perHour >= MAX_LINKS_PER_HOUR) return { success: false, message: 'יש עומס רגעי. נסו שוב בעוד כמה דקות' };
+    const res = withLock(function () {
+      const key = emailKey(norm);
+      const sheet = ensureSheet(T_EMAILS, EMAIL_HEADERS);
+      const n = sheet.getLastRow() - 1;
+      const rows = n > 0 ? sheet.getRange(2, 1, n, 3).getValues() : [];
+      let at = -1;
+      for (let i = 0; i < rows.length; i++) if (String(rows[i][1]) === key) { at = i; break; }
 
-    const token = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
-    withLock(function () { ensureSheet(T_LINKS, LINK_HEADERS).appendRow([new Date(), sha256Hex(token), rid]); });
+      if (at === -1) {
+        const cache = CacheService.getScriptCache();
+        const perHour = Number(cache.get('new_emails_hour') || 0);
+        if (perHour >= MAX_NEW_EMAILS_PER_HOUR) return { success: false, message: 'יש עומס רגעי. נסו שוב בעוד כמה דקות' };
+        sheet.appendRow([new Date(), key, rid]);
+        cache.put('new_emails_hour', String(perHour + 1), 3600);
+        return { success: true, status: 'new' };
+      }
 
-    const link = SITE_URL + '?r=' + token;
-    MailApp.sendEmail({
-      to: email,
-      subject: 'הקישור שלך להמשך סקר התושבים · נופי פרת',
-      name: 'סקר התושבים נופי פרת',
-      noReply: true,
-      body: 'שלום,\n\nזה הקישור האישי שלך להמשך סקר התושבים של נופי פרת. הוא פותח את הסקר בדיוק מאיפה שעצרת, מכל מכשיר:\n' + link +
-        '\n\nהקישור אישי ותקף ל-' + LINK_DAYS + ' יום. לא להעביר אותו הלאה, כי הוא פותח את התשובות שלך.\nלא ביקשת את המייל הזה? אפשר פשוט להתעלם ממנו.\n\nועד ההנהלה ועובדי היישוב',
-      htmlBody:
-        '<div dir="rtl" style="font-family:Arial,sans-serif;font-size:16px;line-height:1.6;color:#1E2A24">' +
-        '<p>שלום,</p>' +
-        '<p>זה הקישור האישי שלך להמשך סקר התושבים של נופי פרת. הוא פותח את הסקר בדיוק מאיפה שעצרת, מכל מכשיר.</p>' +
-        '<p style="margin:22px 0"><a href="' + link + '" style="display:inline-block;background:#BF5533;color:#ffffff;padding:13px 28px;border-radius:26px;text-decoration:none;font-weight:bold">להמשך הסקר</a></p>' +
-        '<p style="color:#656C64;font-size:14px">הקישור אישי ותקף ל-' + LINK_DAYS + ' יום. לא להעביר אותו הלאה, כי הוא פותח את התשובות שלך.<br>לא ביקשת את המייל הזה? אפשר פשוט להתעלם ממנו.</p>' +
-        '<p style="color:#656C64;font-size:14px">ועד ההנהלה ועובדי היישוב</p></div>',
+      const known = String(rows[at][2]);
+      if (known === rid) return { success: true, status: 'same' };
+
+      const raw = getSpreadsheet().getSheetByName(T_RAW);
+      const rawData = raw && raw.getLastRow() > 1 ? raw.getDataRange().getValues() : [[]];
+      // הסקר של הכתובת בוטל ב"להתחיל מחדש": הכתובת עוברת לסקר החדש
+      if (discardedRids(rawData)[known]) {
+        sheet.getRange(at + 2, 3).setValue(rid);
+        return { success: true, status: 'new' };
+      }
+
+      // הגולמי מסודר לפי זמן, אז השורה האחרונה של כל נושא היא המצב שלו
+      const done = {};
+      let about = {};
+      for (let i = 1; i < rawData.length; i++) {
+        if (String(rawData[i][1]) !== known) continue;
+        const chId = String(rawData[i][2]);
+        const ans = parseJsonSafe(String(rawData[i][3]), {});
+        const real = Object.keys(ans).some(function (k) { return k.charAt(0) !== '_'; });
+        done[chId] = { ts: new Date(rawData[i][0]).toISOString(), skipped: !real };
+        if (chId === 'about') about = ans;
+      }
+      return { success: true, status: 'resume', rid: known, done: done, about: about };
     });
 
-    cache.put(ek, String(perEmail + 1), 3600);
-    cache.put('mail_hour', String(perHour + 1), 3600);
-    return { success: true };
+    // מ"קצת עליך" חוזרות רק התשובות שקובעות אילו נושאים ושאלות מוצגים (למשל ילדים בבית)
+    if (res.status === 'resume') {
+      const logic = profileKeysForLogic();
+      res.profile = {};
+      Object.keys(res.about).forEach(function (k) { if (logic[k]) res.profile[k] = res.about[k]; });
+      delete res.about;
+    }
+    return res;
   } catch (e) {
     return { success: false, message: e.toString() };
   }
 }
 
-function resumeByToken(token) {
-  try {
-    token = String(token || '').trim().toLowerCase();
-    const BAD = { success: false, message: 'הקישור לא תקין. אפשר לבקש חדש ב"אמשיך אחר כך"' };
-    if (!/^[a-f0-9]{64}$/.test(token)) return BAD;
-    const sheet = getSpreadsheet().getSheetByName(T_LINKS);
-    if (!sheet || sheet.getLastRow() <= 1) return BAD;
-    const h = sha256Hex(token);
-    const data = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
-    for (let i = data.length - 1; i >= 0; i--) {
-      if (String(data[i][1]) !== h) continue;
-      if (new Date().getTime() - new Date(data[i][0]).getTime() > LINK_DAYS * 864e5) {
-        return { success: false, message: 'תוקף הקישור פג. אפשר לבקש חדש ב"אמשיך אחר כך"' };
-      }
-      const rid = String(data[i][2]);
-      const raw = getSpreadsheet().getSheetByName(T_RAW);
-      const rawData = raw && raw.getLastRow() > 1 ? raw.getDataRange().getValues() : [[]];
-      if (discardedRids(rawData)[rid]) return { success: false, message: 'התשובות של הקישור הזה בוטלו ("להתחיל מחדש")' };
-      const res = resume(rid);
-      // קישור שנשלח לפני שנשמר נושא כלשהו: ממשיכים עם אותו קוד עונה, בלי תשובות
-      return { success: true, rid: rid, chapters: res.success ? res.chapters : {} };
-    }
-    return BAD;
-  } catch (e) {
-    return { success: false, message: e.toString() };
-  }
+function profileKeysForLogic() {
+  const survey = loadSurvey();
+  const keys = {};
+  (survey ? survey.chapters : []).forEach(function (ch) {
+    [ch].concat(ch.questions).forEach(function (x) {
+      if (x.showIf && String(x.showIf.q).indexOf('about_') === 0) keys[x.showIf.q] = true;
+    });
+  });
+  return keys;
 }
 
 // ============================================================
@@ -783,11 +815,8 @@ function route(e, body) {
       case 'discard':
         return jsonResponse(discard(p.rid));
 
-      case 'sendResumeLink':
-        return jsonResponse(sendResumeLink(p.email, p.rid));
-
-      case 'resumeByToken':
-        return jsonResponse(resumeByToken(p.token));
+      case 'identify':
+        return jsonResponse(identify(p.email, p.rid));
 
       case 'enterRaffle':
         return jsonResponse(enterRaffle(p.rid, p.name, p.phone));

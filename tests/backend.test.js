@@ -2,11 +2,12 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const crypto = require('crypto');
 
 const ROOT = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 
 const { createGas } = require('./mock-gas.js');
-const { ctx, SS, props, cache, triggers, logs, mails } = createGas(ROOT);
+const { ctx, SS, props, cache, triggers, logs } = createGas(ROOT);
 
 const sctx = { window: {} };
 vm.createContext(sctx);
@@ -31,6 +32,8 @@ ctx.setup();
 check('setup twice: still one trigger', triggers.length === 1);
 check('setup: password logged', logs.some(l => String(l).includes(pw())));
 check('setup: no phone secret needed anymore', !props.PHONE_PEPPER);
+check('setup: email secret created in script properties', typeof props.EMAIL_SECRET === 'string' && props.EMAIL_SECRET.length === 64);
+check('setup: emails tab', !!SS.getSheetByName('מיילים'));
 
 // ── 2. seed ──
 check('ping', get({ action: 'ping' }).success === true);
@@ -58,6 +61,7 @@ for (const ch of SURVEY.chapters) {
       check('q ' + q.id + '.' + k, (bq[k] === undefined ? '' : bq[k]) === (q[k] === undefined ? '' : q[k]), [bq[k], q[k]]);
     }
     check('q ' + q.id + '.opts', JSON.stringify(bq.opts || []) === JSON.stringify(q.opts || []));
+    check('q ' + q.id + '.required', typeof bq.required === 'boolean' && bq.required === !!q.required, [bq.required, q.required]);
     check('q ' + q.id + '.showIf', JSON.stringify(normCond(bq.showIf)) === JSON.stringify(normCond(q.showIf)), [bq.showIf, q.showIf]);
   }
 }
@@ -94,45 +98,50 @@ check('system chapter name rejected', !r.success);
 r = post({ action: 'submitChapter', rid: A, chapter: 'community', answers: { brand_new_q: 'x' } });
 check('new question column added on the fly', r.success && flat.rows[0].includes('brand_new_q'), r);
 
-// ── 5. "אמשיך אחר כך": קישור אישי במייל ──
-// פעולות הטלפון הישנות לא חשופות, ואין פעולה שמחזירה תשובות לפי קוד עונה
-for (const action of ['linkResume', 'resumeByPhone', 'resumeByHash', 'resume']) {
-  r = post({ action, rid: A, phone: '0541234567', pin: '1234' });
+// ── 5. מייל = זהות (בלי שליחה) ──
+// פעולות ההמשך הישנות (טלפון + קוד, קישור במייל) לא חשופות, ואין פעולה שמחזירה תשובות לפי קוד עונה
+for (const action of ['linkResume', 'resumeByPhone', 'resumeByHash', 'resume', 'sendResumeLink', 'resumeByToken']) {
+  r = post({ action, rid: A, phone: '0541234567', pin: '1234', email: 'dana@example.co.il', token: 'a'.repeat(64) });
   check(action + ' not exposed', !r.success && /Unknown action/.test(r.message), r);
 }
-r = post({ action: 'sendResumeLink', email: 'not-an-email', rid: A });
-check('bad email rejected', !r.success && mails.length === 0, r);
-r = post({ action: 'sendResumeLink', email: 'Dana@Example.co.il ', rid: A });
-check('link sent', r.success && mails.length === 1, r);
-const mail = mails[0];
-const linkMatch = /https:\/\/sekernofey\.online\/\?r=([a-f0-9]{64})/.exec(mail.body);
-check('mail to the address, from no-reply, with a link on our domain', mail.to === 'dana@example.co.il' && mail.noReply === true && !!linkMatch && mail.htmlBody.includes(linkMatch[0]), mail);
-const token = linkMatch && linkMatch[1];
-const linksTab = SS.getSheetByName('קישורי המשך');
-check('email not stored anywhere in the sheet', !JSON.stringify(Object.values(SS.sheets).map(sh => sh.rows)).toLowerCase().includes('dana@example'));
-check('token not stored in clear', !JSON.stringify(linksTab.rows).includes(token));
-r = post({ action: 'resumeByToken', token });
-check('resume by token', r.success && r.rid === A && r.chapters.community.answers.comm_belong === 7, r);
-r = post({ action: 'resumeByToken', token: token.replace(/^./, c => (c === 'a' ? 'b' : 'a')) });
-check('wrong token fails', !r.success, r);
-r = post({ action: 'resumeByToken', token: 'x' });
-check('malformed token fails', !r.success, r);
-post({ action: 'sendResumeLink', email: 'dana@example.co.il', rid: A });
-post({ action: 'sendResumeLink', email: 'dana@example.co.il', rid: A });
-r = post({ action: 'sendResumeLink', email: 'dana@example.co.il', rid: A });
-check('max 3 links per email per hour', !r.success && mails.length === 3, r);
-Object.keys(cache).forEach(k => delete cache[k]);
-// קישור לפני ששמרו נושא כלשהו: ממשיכים עם אותו קוד עונה, בלי תשובות
-const E = 'EEEEEEEE';
-r = post({ action: 'sendResumeLink', email: 'new@example.com', rid: E });
-const tokenE = /\?r=([a-f0-9]{64})/.exec(mails[mails.length - 1].body)[1];
-r = post({ action: 'resumeByToken', token: tokenE });
-check('link before any answer keeps the rid', r.success && r.rid === E && Object.keys(r.chapters).length === 0, r);
-// תוקף: קישור בן יותר מ-45 יום נדחה
-linksTab.rows.find(x => x[2] === E)[0] = new Date(Date.now() - 46 * 864e5);
-r = post({ action: 'resumeByToken', token: tokenE });
-check('expired link fails', !r.success && r.message.includes('תוקף'), r);
-check('no old phone-links tab', !SS.getSheetByName('קודי המשך'));
+r = post({ action: 'identify', email: 'not-an-email', rid: A });
+check('bad email rejected', !r.success && r.message.includes('מייל'), r);
+r = post({ action: 'identify', email: 'dana@example.co.il', rid: 'bad' });
+check('bad rid rejected on identify', !r.success, r);
+r = post({ action: 'identify', email: 'Dana@Example.co.il ', rid: A });
+check('new email binds to the device rid', r.success && r.status === 'new', r);
+const emails = SS.getSheetByName('מיילים');
+const allCells = () => JSON.stringify(Object.values(SS.sheets).map(sh => sh.rows));
+check('emails tab: one row with rid A', emails.rows.length === 2 && emails.rows[1][2] === A, emails.rows);
+check('email not stored anywhere in the sheet', !allCells().toLowerCase().includes('dana'));
+check('email key is keyed, not a plain sha256', /^[a-f0-9]{64}$/.test(emails.rows[1][1]) && emails.rows[1][1] !== crypto.createHash('sha256').update('dana@example.co.il').digest('hex'), emails.rows[1][1]);
+check('secret not in the sheet', !allCells().includes(props.EMAIL_SECRET));
+r = post({ action: 'identify', email: 'dana@example.co.il', rid: A });
+check('same email, same device', r.success && r.status === 'same', r);
+// מכשיר אחר עם אותו מייל: ממשיכים את הסקר של A
+r = post({ action: 'identify', email: ' DANA@example.co.il', rid: 'NEWDEV22' });
+check('same email from another device resumes A', r.success && r.status === 'resume' && r.rid === A, r);
+check('resume: saved topics, skipped marked', r.done && r.done.about && r.done.community && r.done.community.skipped === false && r.done.budget.skipped === true, r.done);
+check('resume: profile has only what drives the logic', JSON.stringify(r.profile) === JSON.stringify({ about_kids: ['נוער (ז׳–י״ב)'] }), r.profile);
+check('resume: no topic answers, no name', !/comm_belong|comm_budget3|brand_new_q|about_name|HYPERLINK|מבוגרים/.test(JSON.stringify(r)), r);
+check('resume adds no rows', emails.rows.length === 2);
+// Gmail: נקודות, "+תוספת" ו-googlemail הם אותה תיבה
+r = post({ action: 'identify', email: 'yossi.cohen+seker@gmail.com', rid: 'GMAILAA2' });
+check('gmail new', r.success && r.status === 'new', r);
+r = post({ action: 'identify', email: 'YossiCohen@googlemail.com', rid: 'GMAILBB3' });
+check('gmail variants = same mailbox', r.success && r.status === 'resume' && r.rid === 'GMAILAA2', r);
+r = post({ action: 'identify', email: 'yossi.cohen+x@walla.co.il', rid: 'WALLAAA2' });
+check('other providers keep dots and plus', r.success && r.status === 'new', r);
+r = post({ action: 'identify', email: 'yossicohen+x@walla.co.il', rid: 'WALLABB2' });
+check('other providers: different address = different survey', r.success && r.status === 'new', r);
+// הגנה מהצפה: כתובות חדשות נעצרות אחרי 400 בשעה, מוכרות ממשיכות לעבוד
+cache.new_emails_hour = '400';
+r = post({ action: 'identify', email: 'flood@example.com', rid: 'FLOODAA2' });
+check('new emails capped per hour', !r.success && r.message.includes('עומס'), r);
+r = post({ action: 'identify', email: 'dana@example.co.il', rid: A });
+check('known email still works under the cap', r.success && r.status === 'same', r);
+delete cache.new_emails_hour;
+check('no old link/phone tabs', !SS.getSheetByName('קישורי המשך') && !SS.getSheetByName('קודי המשך'));
 
 // ── 6. הגרלה ──
 r = post({ action: 'enterRaffle', rid: A, name: 'ישראל ישראלי', phone: '0541234567' });
@@ -159,13 +168,18 @@ check('raffle phone keeps leading zero', raffle.rows.slice(1).every(x => String(
 // ── 7. התחלה מחדש ──
 post({ action: 'submitChapter', rid: B, chapter: 'community', answers: { comm_belong: 1 } });
 check('B in flat', flat.rows.some(x => x[0] === B));
+r = post({ action: 'identify', email: 'b@example.com', rid: B });
+check('B identified', r.success && r.status === 'new', r);
 r = post({ action: 'discard', rid: B });
 check('discard ok', r.success, r);
 check('B removed from flat', !flat.rows.some(x => x[0] === B));
-post({ action: 'sendResumeLink', email: 'b@example.com', rid: B });
-const tokenB = /\?r=([a-f0-9]{64})/.exec(mails[mails.length - 1].body)[1];
-r = post({ action: 'resumeByToken', token: tokenB });
-check('link of a discarded respondent does not return answers', !r.success && !r.chapters, r);
+// אחרי "להתחיל מחדש" אותו מייל עובר לקוד העונה החדש, והסקר שבוטל לא חוזר
+const B2 = 'BBBBBBB2';
+r = post({ action: 'identify', email: 'b@example.com', rid: B2 });
+check('email of a discarded survey moves to the new one', r.success && r.status === 'new' && !r.rid, r);
+check('emails row now points to the new rid', emails.rows.some(x => x[2] === B2) && !emails.rows.some(x => x[2] === B), emails.rows);
+r = post({ action: 'identify', email: 'b@example.com', rid: 'OTHERDV2' });
+check('another device then resumes the new survey', r.success && r.status === 'resume' && r.rid === B2 && Object.keys(r.done).length === 0, r);
 
 // ── 8. דשבורד ──
 r = post({ action: 'getResults', password: 'nope' });
@@ -204,6 +218,15 @@ qs.rows.push(['post', 'post_new', 'טקסט קצר', 'שאלה חדשה', '', ''
 qs.rows.find(x => x[1] === 'post_best_hours')[13] = 'לא';
 const post2 = get({ action: 'getSurvey' }).survey.chapters.find(c => c.id === 'post');
 check('manual row sorted by its order column', JSON.stringify(post2.questions.map(q => q.id)) === JSON.stringify(['post_hours', 'post_new']), post2.questions.map(q => q.id));
+
+// ── 12. גיליון שנזרע לפני עמודת "חובה": השרת לא מחזיר required, והאתר לוקח מ-survey-data.js ──
+const qTab = SS.getSheetByName('שאלות');
+const savedRows = qTab.rows.map(row => row.slice());
+qTab.rows.forEach(row => { row.length = Math.min(row.length, 15); });
+const legacy = get({ action: 'getSurvey' }).survey;
+check('legacy sheet: required not sent', legacy.chapters.every(c => c.questions.every(q => q.required === undefined)));
+qTab.rows = savedRows;
+check('with the column: about demographics required', get({ action: 'getSurvey' }).survey.chapters.find(c => c.id === 'about').questions.filter(q => q.required).length === 6);
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

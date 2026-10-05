@@ -58,22 +58,25 @@
 
 <script>
 /* ============================================================
-   סקר נופי פרת — v2
-   זרימה ליניארית: נחיתה → "קצת עליך" → נושא אחרי נושא, לפי סדר התחומים.
-   מסך התחומים הוא סקירה: איפה אני, ומעבר חופשי לכל נושא.
+   סקר נופי פרת — v3
+   זרימה ליניארית: נחיתה → מייל (זהות: סקר אחד לכל כתובת) → "קצת עליך" (חובה, חוץ מהשם)
+   → נושא אחרי נושא, לפי סדר התחומים. מסך התחומים הוא סקירה: איפה אני, ומעבר חופשי לכל נושא.
    ============================================================ */
 
 const S = {
   survey: null,
   done: {},                // chapterId → ISO timestamp
+  remote: {},              // נושאים שנשמרו ממכשיר אחר → הטיוטה כפי ששוחזרה (התשובות עצמן לא מגיעות לכאן)
   serverMode: false,
   raffleEntered: false,
-  view: '',                // המסך הנוכחי: landing | categories | category | chapter | closed
+  view: '',                // המסך הנוכחי: landing | email | categories | category | chapter | closed
 };
 
 const DONE_KEY = 'np_done';
 const RAFFLE_KEY = 'np_raffle_entered';
 const VER_KEY = 'np_ver';
+const EMAIL_KEY = 'np_email';
+const REMOTE_KEY = 'np_remote';
 const draftKey = (ch) => 'np_draft_' + ch;
 
 init();
@@ -82,22 +85,13 @@ async function init() {
   document.querySelectorAll('[data-icon]').forEach(n => n.replaceWith(icon(n.dataset.icon)));
   resetIfNewVersion();
   S.done = JSON.parse(localStorage.getItem(DONE_KEY) || '{}');
+  S.remote = JSON.parse(localStorage.getItem(REMOTE_KEY) || '{}');
   S.raffleEntered = localStorage.getItem(RAFFLE_KEY) === 'yes';
   S.serverMode = !isLocalMode();
   document.getElementById('previewBanner').hidden = S.serverMode;
 
   // מציגים מיד מהקובץ המוטמע, בלי לחכות לשרת (התעוררות של Apps Script לוקחת כמה שניות)
   S.survey = window.SURVEY_DATA;
-
-  // נכנסו מקישור "אמשיך אחר כך" במייל: טוענים את ההתקדמות מהשרת לפני שמציגים משהו
-  const token = new URLSearchParams(location.search).get('r');
-  if (token) {
-    history.replaceState(null, '', location.pathname); // הקישור האישי לא נשאר בשורת הכתובת
-    if (S.serverMode) {
-      document.getElementById('loadingText').textContent = 'ממשיכים מאיפה שעצרתם…';
-      await resumeFromLink(token);
-    }
-  }
   document.getElementById('loadingScreen').classList.add('hidden');
   goHome();
 
@@ -106,6 +100,12 @@ async function init() {
     const res = await apiCall('getSurvey');
     if (res.open === false) return goClosed();
     if (res.success && res.survey && res.survey.chapters && res.survey.chapters.length) {
+      // "חובה" מגיע מהגיליון. גיליון שנזרע לפני שהעמודה נוספה לא שולח אותו, ואז לפי survey-data.js
+      const bundled = {};
+      window.SURVEY_DATA.chapters.forEach(c => c.questions.forEach(q => { bundled[q.id] = q; }));
+      res.survey.chapters.forEach(c => c.questions.forEach(q => {
+        if (q.required === undefined) q.required = !!(bundled[q.id] && bundled[q.id].required);
+      }));
       // השאלות מהגיליון (שם הצוות עורך), הטקסטים הכלליים (פתיח, שו"ת, הגרלה, תחומים) מהקוד
       S.survey = { meta: window.SURVEY_DATA.meta, chapters: res.survey.chapters };
       // הגרסה מהגיליון (שהצוות אולי ערך) נכנסת לתוקף; באמצע פרק לא מרעננים כדי לא לקטוע הקלדה
@@ -141,6 +141,14 @@ function getDraft(chId) {
 
 function setDraft(chId, answers) {
   localStorage.setItem(draftKey(chId), JSON.stringify(answers));
+}
+
+function hasIdentity() {
+  return !!localStorage.getItem(EMAIL_KEY);
+}
+
+function saveRemote() {
+  localStorage.setItem(REMOTE_KEY, JSON.stringify(S.remote));
 }
 
 function allAnswers() {
@@ -219,8 +227,13 @@ function nextChapter() {
   return orderedChapters().find(ch => !S.done[ch.id]) || null;
 }
 
+// "קצת עליך" חובה לפני הנושאים (אם הפרק פעיל בגיליון)
+function needsAbout() {
+  return !S.done['about'] && S.survey.chapters.some(c => c.id === 'about');
+}
+
 function startSurvey() {
-  if (!S.done['about']) return goChapter('about');
+  if (needsAbout()) return goChapter('about');
   goNext();
 }
 
@@ -303,7 +316,7 @@ function goCategories() {
       !S.done['about'] ? 'מתחילים' : (topicStats().done ? 'להמשיך: ' : 'לנושא הראשון: ') + next.title, icon('arrow-left')));
   }
 
-  // "קצת עליך": מומלץ, לא חוסם
+  // "קצת עליך": חובה לפני הנושאים (goChapter מפנה אליו)
   const aboutDone = !!S.done['about'];
   kids.push(el('button', { class: 'profile-strip' + (aboutDone ? ' is-done' : ''), onclick: () => goChapter('about') },
     el('span', { class: 'p-icon' }, icon('user-round')),
@@ -348,6 +361,14 @@ function goCategories() {
     kids.push(strip([el('strong', {}, left === 1 ? 'עוד נושא אחד' : 'עוד ' + left + ' נושאים'), ' ואתם בהגרלת ' + m.raffle.prize]));
   } else {
     kids.push(strip(['משלימים את הסקר ונכנסים להגרלת ', el('strong', {}, m.raffle.prize)]));
+  }
+
+  // מכשיר משותף: מי ממלא עכשיו, ומעבר למישהו אחר בלי לגעת בתשובות שכבר נשמרו
+  const email = localStorage.getItem(EMAIL_KEY);
+  if (email) {
+    kids.push(el('p', { class: 'who' },
+      'ממלאים בתור ', el('bdi', { dir: 'ltr' }, email), el('br'),
+      el('button', { class: 'link-btn', onclick: showSwitchModal }, 'מישהו אחר ממלא?')));
   }
 
   setView(el('div', {}, ...kids), null, 'categories');
@@ -407,6 +428,12 @@ function visibleQuestionCount(ch) {
 // ── מסך פרק ──────────────────────────────────────────────
 
 function goChapter(chId) {
+  // קודם המייל (סקר אחד לכל כתובת), ואז "קצת עליך", שהפרטים בו חובה
+  if (!hasIdentity()) return goEmail();
+  if (chId !== 'about' && needsAbout()) {
+    showToast('מתחילים ב"קצת עליך", חצי דקה', 'info', 2400);
+    chId = 'about';
+  }
   const ch = S.survey.chapters.find(c => c.id === chId);
   if (!ch) return goCategories();
   const cat = catOf(ch);
@@ -434,6 +461,15 @@ function goChapter(chId) {
   }
   // פתיח וסיום בקול של הוועדה (למשל ועדת התרבות)
   if (ch.intro) container.append(el('p', { class: 'ch-intro' }, ch.intro));
+
+  // נושא שנשמר ממכשיר אחר: התשובות לא מגיעות לכאן, כדי שמי שמקליד מייל של מישהו אחר לא יראה אותן
+  if (chId in S.remote) {
+    container.append(el('p', { class: 'ch-note' }, icon('lock'),
+      el('span', {}, 'התשובות שלך לנושא הזה כבר שמורות. כאן הן לא מוצגות, כדי שאף אחד אחר לא יוכל לראות אותן. מענה חדש יחליף אותן.')));
+  }
+  if (withMore(ch).some(q => q.required)) {
+    container.append(el('p', { class: 'req-legend' }, el('span', { class: 'q-req', 'aria-hidden': 'true' }, '*'), ' שאלת חובה'));
+  }
 
   const qWrap = el('div', {});
   withMore(ch).forEach(q => qWrap.append(renderQuestion(ch, q, answers)));
@@ -472,6 +508,10 @@ function saveAnswer(ch, qId, value) {
   if (value === '' || value === null || (Array.isArray(value) && !value.length)) delete answers[qId];
   else answers[qId] = value;
   setDraft(ch.id, answers);
+  if (answers[qId] !== undefined) {
+    const card = document.getElementById('q_' + qId);
+    if (card) card.classList.remove('q-missing');
+  }
   refreshVisibility(ch);
 }
 
@@ -479,7 +519,9 @@ function saveAnswer(ch, qId, value) {
 
 function renderQuestion(ch, q, answers) {
   const card = el('div', { class: 'q-card', id: 'q_' + q.id });
-  card.append(el('p', { class: 'q-text' }, q.text));
+  card.append(el('p', { class: 'q-text' }, q.text,
+    q.required ? el('span', { class: 'q-req', 'aria-hidden': 'true' }, ' *') : null,
+    q.required ? el('span', { class: 'sr-only' }, ' (חובה)') : null));
   if (q.help) card.append(el('p', { class: 'q-help' }, q.help));
   const body = el('div', { class: 'q-body' });
 
@@ -493,6 +535,7 @@ function renderQuestion(ch, q, answers) {
     case 'rank':     body.append(renderRank(ch, q, answers)); break;
   }
   card.append(body);
+  if (q.required) card.append(el('p', { class: 'q-err' }, 'צריך לענות כאן כדי להמשיך'));
   return card;
 }
 
@@ -725,6 +768,10 @@ function renderRank(ch, q, answers) {
 
 async function submitChapter(ch) {
   const btn = document.getElementById('submitBtn');
+
+  // נושא ששמור ממכשיר אחר ולא נגעו בו כאן: ממשיכים בלי לדרוס את התשובות השמורות
+  if (ch.id in S.remote && JSON.stringify(getDraft(ch.id)) === S.remote[ch.id]) return afterChapterDone(ch, false);
+
   const answers = getDraft(ch.id);
   const ctx = Object.assign(allAnswers(), answers);
   const visAns = {};
@@ -732,7 +779,16 @@ async function submitChapter(ch) {
     if (evalCond(q.showIf, ctx) && answers[q.id] !== undefined) visAns[q.id] = answers[q.id];
   });
 
-  // פרופיל מותר להגיש גם ריק (אנונימיות מלאה) — מסמנים שהוגש
+  // שאלות חובה (הפרטים הדמוגרפיים ב"קצת עליך")
+  const missing = withMore(ch).filter(q => q.required && evalCond(q.showIf, ctx) && visAns[q.id] === undefined);
+  if (missing.length) {
+    missing.forEach(q => { const n = document.getElementById('q_' + q.id); if (n) n.classList.add('q-missing'); });
+    const first = document.getElementById('q_' + missing[0].id);
+    if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    showToast(missing.length === 1 ? 'נשארה שאלת חובה אחת' : 'נשארו ' + missing.length + ' שאלות חובה', 'warning');
+    return;
+  }
+
   if (ch.id === 'about') visAns.about_submitted = 'כן';
 
   if (!Object.keys(visAns).length) {
@@ -766,6 +822,7 @@ async function submitChapter(ch) {
   setDraft(ch.id, visAns);
   S.done[ch.id] = new Date().toISOString();
   localStorage.setItem(DONE_KEY, JSON.stringify(S.done));
+  if (ch.id in S.remote) { delete S.remote[ch.id]; saveRemote(); }
   afterChapterDone(ch, false);
 }
 
@@ -783,6 +840,7 @@ async function skipChapter(ch) {
   setDraft(ch.id, { _skipped: 'כן' });
   S.done[ch.id] = new Date().toISOString();
   localStorage.setItem(DONE_KEY, JSON.stringify(S.done));
+  if (ch.id in S.remote) { delete S.remote[ch.id]; saveRemote(); }
   afterChapterDone(ch, true);
 }
 
@@ -809,69 +867,104 @@ function validPhone(p) {
   return /^0\d{8,9}$/.test(p.replace(/[^0-9]/g, ''));
 }
 
-// ── "אמשיך אחר כך": קישור אישי במייל ───────────────────
-// המייל לא נשמר. השרת שולח קישור עם טוקן סודי, ופתיחתו בכל מכשיר טוענת את הנושאים ששמרו.
+// ── מייל: זהות, סקר אחד לכל כתובת ───────────────────────
+// לא שולחים אליו כלום. השרת שומר רק קוד מוצפן שלו, וכתובת מוכרת ממכשיר אחר ממשיכה את אותו סקר.
 
 function validEmail(e) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
 }
 
-function showLaterModal() {
-  const emailIn = el('input', { class: 'txt-input', type: 'email', inputmode: 'email', autocomplete: 'email', dir: 'ltr', placeholder: 'name@example.com', 'aria-label': 'כתובת מייל', style: 'text-align:center' });
-  const send = async (e) => {
-    const b = e.currentTarget; // הכפתור עצמו, גם כשלוחצים על האייקון שבתוכו
-    const email = emailIn.value.trim();
-    if (!validEmail(email)) { showToast('בדקו את כתובת המייל', 'warning'); return; }
-    if (!S.serverMode) { showToast('יעבוד אחרי חיבור המערכת לשרת', 'warning'); return; }
-    b.disabled = true;
-    b.textContent = 'שולח…';
-    try {
-      const res = await apiPost('sendResumeLink', { email, rid: getRid() });
-      if (!res.success) throw new ServerSaid(res.message);
-      closeModal();
-      showToast('שלחנו! הקישור מחכה במייל. לא הגיע? בדקו גם בספאם', 'success', 6000);
-    } catch (err) {
-      b.disabled = false;
-      b.replaceChildren('שליחת קישור', icon('send'));
-      showToast(err instanceof ServerSaid && err.message ? err.message : 'לא הצליח, נסו שוב', 'error');
-    }
-  };
-  const modal = el('div', { class: 'modal' },
-    el('h3', {}, icon('bookmark'), 'ממשיכים מתי שנוח'),
-    el('p', {}, 'ההתקדמות נשמרת אוטומטית במכשיר הזה, אפשר פשוט לסגור ולחזור.'),
-    el('p', {}, el('strong', {}, 'רוצים להמשיך אחר כך או ממכשיר אחר?'), ' השאירו מייל ונשלח לכם קישור אישי שממשיך בדיוק מאיפה שעצרתם.'),
-    emailIn,
-    el('p', { class: 'small muted mt' }, 'המייל לא נשמר אצלנו, הוא משמש רק לשליחת הקישור. הקישור ממשיך מהנושא האחרון ששמרתם.'),
-    el('div', { class: 'modal-actions' },
-      el('button', { class: 'btn btn-primary', onclick: send }, 'שליחת קישור', icon('send')),
-      el('button', { class: 'btn btn-ghost', onclick: closeModal }, 'סגירה')
-    )
+function goEmail() {
+  closeModal();
+  const input = el('input', { class: 'txt-input email-input', type: 'email', inputmode: 'email', autocomplete: 'email', dir: 'ltr', placeholder: 'name@example.com', 'aria-label': 'כתובת המייל שלך', 'aria-required': 'true' });
+  const go = el('button', { class: 'btn btn-primary', onclick: () => submitEmail(input, go) }, 'המשך', icon('arrow-left'));
+  const view = el('div', {},
+    el('div', { class: 'chapter-header' },
+      el('span', { class: 'ch-icon' }, icon('mail')),
+      el('div', {},
+        el('h2', {}, 'נתחיל במייל'),
+        el('p', { class: 'ch-desc' }, 'כך כל אחד ממלא פעם אחת, וממשיכים מכל מכשיר'))),
+    el('div', { class: 'q-card' },
+      el('p', { class: 'q-text' }, 'כתובת המייל שלך'),
+      el('div', { class: 'q-body' }, input),
+      el('p', { class: 'email-privacy' }, icon('lock'),
+        el('span', {}, 'לא שולחים אליו כלום. הכתובת לא נשמרת אצלנו, רק קוד מוצפן שלה, כך שאף אחד לא רואה אותה.'))),
+    el('p', { class: 'land-note' }, 'כבר התחלתם במכשיר אחר? מקלידים את אותו מייל וממשיכים מאיפה שעצרתם.'),
+    el('div', { class: 'chapter-nav' },
+      el('button', { class: 'btn btn-ghost btn-round', 'aria-label': 'חזרה', title: 'חזרה', onclick: goHome }, icon('arrow-right')),
+      go)
   );
-  openModal(modal);
-  emailIn.addEventListener('keydown', ev => { if (ev.key === 'Enter') modal.querySelector('.btn-primary').click(); });
+  setView(view, 'green', 'email');
+  input.addEventListener('keydown', ev => { if (ev.key === 'Enter') go.click(); });
 }
 
-async function resumeFromLink(token) {
-  try {
-    const res = await apiPost('resumeByToken', { token });
-    if (!res.success) throw new ServerSaid(res.message);
-    // קישור של עונה אחר ממה שיש במכשיר: מתחילים מהמצב שבשרת, בלי טיוטות של הזהות הקודמת
-    if (getRid() !== res.rid) {
-      Object.keys(localStorage).filter(k => k.startsWith('np_draft_')).forEach(k => localStorage.removeItem(k));
-      localStorage.removeItem(RAFFLE_KEY);
-      S.raffleEntered = false;
+async function submitEmail(input, btn) {
+  const email = input.value.trim();
+  if (!validEmail(email)) { showToast('בדקו את כתובת המייל', 'warning'); input.focus(); return; }
+  if (S.serverMode) {
+    const content = [...btn.childNodes];
+    btn.disabled = true;
+    btn.textContent = 'רגע…';
+    try {
+      const res = await apiPost('identify', { email, rid: getRid() });
+      if (!res.success) throw new ServerSaid(res.message);
+      if (res.status === 'resume') applyResume(res);
+    } catch (e) {
+      btn.disabled = false;
+      btn.replaceChildren(...content);
+      showToast(e instanceof ServerSaid && e.message ? e.message : 'לא הצליח. בדקו את החיבור ונסו שוב', 'error', 5000);
+      return;
     }
-    setRid(res.rid);
-    S.done = {};
-    for (const [chId, data] of Object.entries(res.chapters || {})) {
-      S.done[chId] = data.ts || new Date().toISOString();
-      setDraft(chId, data.answers || {});
-    }
-    localStorage.setItem(DONE_KEY, JSON.stringify(S.done));
-    showToast('ברוכים השבים! ממשיכים מאיפה שעצרתם 👋', 'success', 3500);
-  } catch (e) {
-    showToast(e instanceof ServerSaid && e.message ? e.message : 'לא הצלחנו לפתוח את הקישור. נסו שוב', 'error', 6000);
   }
+  localStorage.setItem(EMAIL_KEY, email);
+  startSurvey();
+}
+
+// אותו מייל ממכשיר אחר: ממשיכים את אותו סקר. מהשרת מגיעה רק ההתקדמות (אילו נושאים נשמרו),
+// ומ"קצת עליך" רק מה שקובע אילו נושאים מוצגים. התשובות עצמן נשארות בשרת.
+function applyResume(res) {
+  Object.keys(localStorage).filter(k => k.startsWith('np_draft_')).forEach(k => localStorage.removeItem(k));
+  localStorage.removeItem(RAFFLE_KEY);
+  S.raffleEntered = false;
+  setRid(res.rid);
+  S.done = {};
+  S.remote = {};
+  for (const [chId, d] of Object.entries(res.done || {})) {
+    S.done[chId] = d.ts || new Date().toISOString();
+    if (d.skipped) { setDraft(chId, { _skipped: 'כן' }); continue; }
+    const restored = chId === 'about' ? (res.profile || {}) : {};
+    if (Object.keys(restored).length) setDraft(chId, restored);
+    S.remote[chId] = JSON.stringify(restored);
+  }
+  localStorage.setItem(DONE_KEY, JSON.stringify(S.done));
+  saveRemote();
+  const n = topicStats().done;
+  showToast('ברוכים השבים! ' + (n ? (n === 1 ? 'נושא אחד כבר שמור' : n + ' נושאים כבר שמורים') + ', ממשיכים' : 'ממשיכים מאיפה שעצרתם'), 'success', 3500);
+}
+
+// "אמשיך אחר כך": אין מה לשלוח. כל נושא כבר שמור, וממשיכים מכל מכשיר עם אותו מייל
+function showLaterModal() {
+  const email = localStorage.getItem(EMAIL_KEY);
+  openModal(el('div', { class: 'modal' },
+    el('h3', {}, icon('bookmark'), 'ממשיכים מתי שנוח'),
+    el('p', {}, 'כל נושא נשמר ברגע שמסיימים אותו, אפשר פשוט לסגור.'),
+    el('p', {}, el('strong', {}, 'כדי להמשיך: '), 'מהמכשיר הזה פשוט חוזרים לאתר. ממכשיר אחר נכנסים ל-',
+      el('bdi', { dir: 'ltr' }, 'sekernofey.online'), email ? ' ומקלידים את המייל שלך:' : ' ומקלידים את המייל שהזנתם בתחילת הסקר.'),
+    email ? el('p', { class: 'email-chip', dir: 'ltr' }, email) : null,
+    el('div', { class: 'modal-actions' },
+      el('button', { class: 'btn btn-primary', onclick: closeModal }, 'הבנתי'))
+  ));
+}
+
+// מכשיר משותף: מישהו אחר ממלא. מה שמילאו עד עכשיו נשאר בשרת, וחוזרים אליו עם אותו מייל
+function showSwitchModal() {
+  openModal(el('div', { class: 'modal' },
+    el('h3', {}, icon('users'), 'מישהו אחר ממלא?'),
+    el('p', {}, 'מה שמילאת עד עכשיו שמור. כדי להמשיך אותו, נכנסים שוב ומקלידים את המייל שלך.'),
+    el('div', { class: 'modal-actions' },
+      el('button', { class: 'btn btn-primary', onclick: () => { clearLocal(); closeModal(); goLanding(); } }, 'החלפה'),
+      el('button', { class: 'btn btn-ghost', onclick: closeModal }, 'ביטול'))
+  ));
 }
 
 // ── התחלה מחדש ──────────────────────────────────────────
@@ -879,7 +972,7 @@ async function resumeFromLink(token) {
 function showRestartModal() {
   const modal = el('div', { class: 'modal' },
     el('h3', {}, icon('rotate-ccw'), 'להתחיל מחדש?'),
-    el('p', {}, 'כל התשובות שלך יימחקו ותוכל להתחיל את הסקר מחדש. האם אתה בטוח?'),
+    el('p', {}, 'כל התשובות שלך יימחקו, והסקר יתחיל מההתחלה.'),
     el('div', { class: 'modal-actions' },
       el('button', { class: 'btn btn-accent', style: 'flex:1', onclick: restartAll }, 'כן, מתחילים מחדש'),
       el('button', { class: 'btn btn-ghost', style: 'flex:1', onclick: closeModal }, 'ביטול')
@@ -902,15 +995,21 @@ async function restartAll(e) {
       return;
     }
   }
+  clearLocal();
+  closeModal();
+  showToast('התחלנו דף חדש 🌱', 'success');
+  goLanding();
+}
+
+// מוחק את כל מה שבמכשיר (כולל המייל) ומתחיל עם קוד עונה חדש
+function clearLocal() {
   Object.keys(localStorage)
     .filter(k => k.startsWith('np_') && k !== VER_KEY)
     .forEach(k => localStorage.removeItem(k));
   S.done = {};
+  S.remote = {};
   S.raffleEntered = false;
-  setRid(makeRid()); // זהות אנונימית חדשה
-  closeModal();
-  showToast('התחלנו דף חדש 🌱', 'success');
-  goLanding();
+  setRid(makeRid());
 }
 
 // ── שו"ת ─────────────────────────────────────────────────
