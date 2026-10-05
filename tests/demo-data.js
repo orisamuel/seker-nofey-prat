@@ -58,7 +58,8 @@ function fillDemo(g, root, n) {
     if (chance(0.45)) k.push(kids[0]);
     if (chance(0.5)) k.push(kids[1]);
     if (chance(0.35)) k.push(kids[2]);
-    p.about_kids = k.length ? k : [kids[3]];
+    if (chance(0.25)) k.push(kids[3]);
+    p.about_kids = k.length ? k : [kids[kids.length - 1]];
     if (chance(0.9)) p.about_gender = pick(opt('about_gender'), [52, 45, 3]);
     if (chance(0.85)) p.about_aguda = pick(opt('about_aguda'), [50, 35, 15]);
     if (chance(0.2)) p.about_name = 'עונה ' + (i + 1);

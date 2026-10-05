@@ -847,7 +847,7 @@ function getResults(password) {
     const raffleCount = raffle ? Math.max(0, raffle.getLastRow() - 1) : 0;
     const emails = getSpreadsheet().getSheetByName(T_EMAILS);
     const identified = emails ? Math.max(0, emails.getLastRow() - 1) : 0; // עברו את שלב המייל (גם מי שלא שמר כלום)
-    return { success: true, rows: rows, raffleCount: raffleCount, identified: identified, survey: publicSurvey() };
+    return { success: true, rows: rows, raffleCount: raffleCount, identified: identified, survey: publicSurvey(), legacy: !settings.surveyRev };
   } catch (e) {
     return { success: false, message: e.toString() };
   }

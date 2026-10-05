@@ -101,9 +101,7 @@ svg.ic { width: 1em; height: 1em; flex: none; display: inline-block; vertical-al
 
 .topbar {
   position: sticky; top: 0; z-index: 40;
-  background: rgba(246, 241, 231, .86);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: rgba(246, 241, 231, .97); /* בלי טשטוש רקע: כבד לגלילה בטלפונים חלשים */
   border-bottom: 1px solid rgba(207, 195, 174, .45);
 }
 
@@ -755,7 +753,6 @@ textarea.txt-input { min-height: 104px; resize: vertical; }
 .modal-back {
   position: fixed; inset: 0;
   background: rgba(20, 30, 25, .5);
-  backdrop-filter: blur(3px);
   z-index: 90;
   display: flex; align-items: flex-end; justify-content: center;
   animation: fadeIn .18s ease;
@@ -1273,9 +1270,9 @@ select.txt-input { appearance: auto; padding-block: 11px; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.fade-in { animation: viewIn .3s cubic-bezier(.2, 1, .4, 1); }
+.fade-in { animation: viewIn .18s ease-out; }
 
-@keyframes viewIn { from { opacity: 0; transform: translateY(10px); } }
+@keyframes viewIn { from { opacity: 0; transform: translateY(6px); } }
 
 @media print {
   .topbar, .chapter-nav, .btn, .toast-container { display: none !important; }

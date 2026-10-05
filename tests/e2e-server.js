@@ -10,6 +10,7 @@ const ROOT = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 const PORT = Number(process.argv[3] || 5178);
 const g = createGas(ROOT);
 g.ctx.setup();
+let delay = 350, failNext = 0;
 
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json' };
 
@@ -21,15 +22,20 @@ http.createServer((req, res) => {
     let body = '';
     req.on('data', c => (body += c));
     req.on('end', () => {
+      // תקלה מדומה (כמו דף השגיאה של גוגל): /__fail?n=3 מפיל את 3 הבקשות הבאות
+      if (failNext > 0) { failNext--; setTimeout(() => { res.writeHead(502); res.end('<html>error</html>'); }, delay); return; }
       const parameter = Object.fromEntries(url.searchParams);
       const out = req.method === 'POST'
         ? g.ctx.doPost({ parameter, postData: { contents: body } })
         : g.ctx.doGet({ parameter });
-      // השהיה קטנה, כמו Apps Script אמיתי
-      setTimeout(() => { res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); res.end(out.getContent()); }, 350);
+      // השהיה כמו Apps Script אמיתי. /__slow?ms=8000 מדמה את התגובות האיטיות שלו
+      setTimeout(() => { res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); res.end(out.getContent()); }, delay);
     });
     return;
   }
+
+  if (url.pathname === '/__slow') { delay = Number(url.searchParams.get('ms')) || 350; res.writeHead(200, cors); res.end(String(delay)); return; }
+  if (url.pathname === '/__fail') { failNext = Number(url.searchParams.get('n')) || 1; res.writeHead(200, cors); res.end(String(failNext)); return; }
 
   // נתוני דמה לבדיקת הדשבורד: /__demo?n=80 (שומר את השאלון מהקוד ומוסיף עונים)
   if (url.pathname === '/__demo') {

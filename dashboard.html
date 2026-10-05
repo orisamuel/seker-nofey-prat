@@ -13,6 +13,7 @@
   <script src="config.js"></script>
   <script src="utils.js"></script>
   <script src="icons.js"></script>
+  <script src="survey-data.js"></script>
 </head>
 <body>
 
@@ -71,7 +72,7 @@ async function load(password) {
     const res = await apiPost('getResults', { password }); // POST: הסיסמה לא נכנסת לכתובת
     if (!res.success) { sessionStorage.removeItem('np_dash_pw'); return renderLogin(res.message); }
     sessionStorage.setItem('np_dash_pw', password);
-    D.rows = res.rows; D.survey = res.survey; D.raffleCount = res.raffleCount || 0; D.identified = res.identified || 0;
+    D.rows = res.rows; D.survey = mergeSurvey(res.survey, window.SURVEY_DATA, res.legacy); D.raffleCount = res.raffleCount || 0; D.identified = res.identified || 0;
     // מיזוג לפי עונה: תשובה אחרונה גוברת. דילוג (_skipped) נספר בנפרד ולא כמענה
     D.respondents = {};
     D.rows.forEach(r => {

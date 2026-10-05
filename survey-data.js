@@ -41,6 +41,7 @@
   const KIDS_TEEN = 'נוער (ז׳–י״ב)';
   const KIDS_ELEM = 'יסודי (א׳–ו׳)';
   const KIDS_TODDLER = 'גיל רך (0–6)';
+  const KIDS_ADULT = 'מעל י״ב';
 
   window.SURVEY_DATA = {
     meta: {
@@ -92,7 +93,7 @@
           r('about_age', 'גיל', ['עד 25', '26–35', '36–45', '46–60', '61 ומעלה'], { required: true }),
           r('about_seniority', 'כמה זמן אתם ביישוב?', ['עד שנתיים', '3–5 שנים', '6–10 שנים', '11–15 שנים', 'יותר מ-15 שנים'], { required: true }),
           r('about_housing', 'איפה אתם גרים?', ['בית קבע', 'שכירות ביחידת דיור', 'קראוון בשכונת מרכז היישוב', 'קראוון בשכונת 468 (גבעת החוד)'], { required: true }),
-          c('about_kids', 'ילדים בבית', [KIDS_TODDLER, KIDS_ELEM, KIDS_TEEN, 'אין ילדים בבית'], { exclusive: 'אין ילדים בבית', required: true }),
+          c('about_kids', 'ילדים בבית', [KIDS_TODDLER, KIDS_ELEM, KIDS_TEEN, KIDS_ADULT, 'אין ילדים בבית'], { exclusive: 'אין ילדים בבית', required: true }),
           r('about_aguda', 'חבר אגודה?', ['כן', 'לא', 'לא יודע']),
         ],
       },

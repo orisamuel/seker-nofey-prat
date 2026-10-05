@@ -77,6 +77,12 @@ const RAFFLE_KEY = 'np_raffle_entered';
 const VER_KEY = 'np_ver';
 const EMAIL_KEY = 'np_email';
 const REMOTE_KEY = 'np_remote';
+const SURVEY_KEY = 'np_survey';
+// התור של השמירה ברקע (ראו "שמירה ברקע" למטה). כאן, כי init רץ לפני שאר הקוד
+const OUTBOX_KEY = 'np_outbox';
+const Q = { items: [], busy: false, timer: null, fails: 0, warned: false };
+// תשובה שלא תשתנה בניסיון חוזר (למשל הסקר נסגר): לא מנסים שוב
+const FINAL_ERROR = /סגור|לא תקין|בדקו את/;
 const draftKey = (ch) => 'np_draft_' + ch;
 
 init();
@@ -89,23 +95,39 @@ async function init() {
   S.raffleEntered = localStorage.getItem(RAFFLE_KEY) === 'yes';
   S.serverMode = !isLocalMode();
   document.getElementById('previewBanner').hidden = S.serverMode;
+  loadOutbox();
 
-  // מציגים מיד מהקובץ המוטמע, בלי לחכות לשרת (התעוררות של Apps Script לוקחת כמה שניות)
-  S.survey = window.SURVEY_DATA;
+  // מציגים מיד, בלי לחכות לשרת: השאלון מהביקור הקודם (אם נערך בדף הניהול), אחרת מהקובץ המוטמע
+  S.survey = cachedSurvey() || window.SURVEY_DATA;
   document.getElementById('loadingScreen').classList.add('hidden');
   goHome();
 
   if (!S.serverMode) return;
+  flush(); // מה שלא הספיק להישלח בביקור הקודם
+  window.addEventListener('online', flush);
+  window.addEventListener('pagehide', beaconOutbox);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') flush(); else beaconOutbox(); });
   try {
     const res = await apiCall('getSurvey');
     if (res.open === false) return goClosed();
     if (res.success && res.survey && res.survey.chapters && res.survey.chapters.length) {
-      // מה שנערך בדף הניהול נכנס לתוקף. באמצע פרק לא מרעננים, כדי לא לקטוע הקלדה
-      S.survey = mergeSurvey(res.survey, window.SURVEY_DATA, res.legacy);
+      const next = mergeSurvey(res.survey, window.SURVEY_DATA, res.legacy);
+      try { localStorage.setItem(SURVEY_KEY, JSON.stringify(res.legacy ? null : next)); } catch (e) { /* מקום */ }
+      // מציירים מחדש רק אם משהו השתנה, ובאמצע נושא לא, כדי לא לקטוע הקלדה
+      if (JSON.stringify(next) === JSON.stringify(S.survey)) return;
+      S.survey = next;
       if (S.view === 'landing' || S.view === 'categories') goHome();
       else updateProgress();
     }
-  } catch (e) { /* נשארים עם הקובץ המוטמע */ }
+  } catch (e) { /* נשארים עם מה שמוצג */ }
+}
+
+// השאלון כפי שהגיע מהשרת בביקור הקודם (רק אחרי שנשמר בדף הניהול; לפני כן הקוד הוא המקור)
+function cachedSurvey() {
+  try {
+    const s = JSON.parse(localStorage.getItem(SURVEY_KEY) || 'null');
+    return s && Array.isArray(s.chapters) && s.chapters.length ? s : null;
+  } catch (e) { return null; }
 }
 
 // שאלון חדש = התחלה נקייה. טיוטות מגרסה קודמת (למשל של מי שבדק את הסקר מראש) נמחקות.
@@ -284,10 +306,8 @@ function posterArt() {
     <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" style="position:absolute;inset:0">
       <defs>
         <radialGradient id="pGlow" cx="85%" cy="0%" r="75%"><stop offset="0" stop-color="#F0BE5A" stop-opacity=".22"/><stop offset="1" stop-color="#F0BE5A" stop-opacity="0"/></radialGradient>
-        <filter id="pGrain"><feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" stitchTiles="stitch"/><feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .06 0"/></filter>
       </defs>
       <rect width="100%" height="100%" fill="url(#pGlow)"/>
-      <rect width="100%" height="100%" filter="url(#pGrain)"/>
     </svg>
     <span style="position:absolute;top:0;right:30px;width:118px;height:59px;border-radius:0 0 118px 118px;background:#E2A73E"></span>
     <svg viewBox="0 0 343 140" preserveAspectRatio="none" style="position:absolute;left:0;right:0;bottom:0;width:100%;height:140px">
@@ -767,9 +787,7 @@ function renderRank(ch, q, answers) {
 
 // ── הגשת פרק + המשך אוטומטי ─────────────────────────────
 
-async function submitChapter(ch) {
-  const btn = document.getElementById('submitBtn');
-
+function submitChapter(ch) {
   // נושא ששמור ממכשיר אחר ולא נגעו בו כאן: ממשיכים בלי לדרוס את התשובות השמורות
   if (ch.id in S.remote && JSON.stringify(getDraft(ch.id)) === S.remote[ch.id]) return afterChapterDone(ch, false);
 
@@ -804,22 +822,8 @@ async function submitChapter(ch) {
     return;
   }
 
-  const btnContent = [...btn.childNodes];
-  btn.disabled = true;
-  btn.textContent = 'שומר…';
-
-  if (S.serverMode) {
-    try {
-      const res = await apiPost('submitChapter', { rid: getRid(), chapter: ch.id, answers: visAns });
-      if (!res.success) throw new ServerSaid(res.message);
-    } catch (e) {
-      btn.disabled = false;
-      btn.replaceChildren(...btnContent);
-      showToast(e instanceof ServerSaid && e.message ? e.message : 'השמירה נכשלה. בדקו את החיבור ונסו שוב', 'error', 5000);
-      return;
-    }
-  }
-
+  // לא מחכים לשרת: התור שולח ברקע
+  enqueue({ type: 'submit', chapter: ch.id, answers: visAns });
   setDraft(ch.id, visAns);
   S.done[ch.id] = new Date().toISOString();
   localStorage.setItem(DONE_KEY, JSON.stringify(S.done));
@@ -828,16 +832,8 @@ async function submitChapter(ch) {
 }
 
 // דילוג על נושא שלם — נחשב "טופל" לצורך ההגרלה
-async function skipChapter(ch) {
-  if (S.serverMode) {
-    try {
-      const res = await apiPost('submitChapter', { rid: getRid(), chapter: ch.id, answers: { _skipped: 'כן' } });
-      if (!res.success) throw new ServerSaid(res.message);
-    } catch (e) {
-      showToast(e instanceof ServerSaid && e.message ? e.message : 'לא הצליח. בדקו את החיבור ונסו שוב', 'error');
-      return;
-    }
-  }
+function skipChapter(ch) {
+  enqueue({ type: 'submit', chapter: ch.id, answers: { _skipped: 'כן' } });
   setDraft(ch.id, { _skipped: 'כן' });
   S.done[ch.id] = new Date().toISOString();
   localStorage.setItem(DONE_KEY, JSON.stringify(S.done));
@@ -884,7 +880,7 @@ function validEmail(e) {
 function goEmail() {
   closeModal();
   const input = el('input', { class: 'txt-input email-input', type: 'email', inputmode: 'email', autocomplete: 'email', dir: 'ltr', placeholder: 'name@example.com', 'aria-label': 'כתובת המייל שלך', 'aria-required': 'true' });
-  const go = el('button', { class: 'btn btn-primary', onclick: () => submitEmail(input, go) }, 'המשך', icon('arrow-left'));
+  const go = el('button', { class: 'btn btn-primary', onclick: () => submitEmail(input) }, 'המשך', icon('arrow-left'));
   const view = el('div', {},
     el('div', { class: 'chapter-header' },
       el('span', { class: 'ch-icon' }, icon('mail')),
@@ -900,49 +896,126 @@ function goEmail() {
   input.addEventListener('keydown', ev => { if (ev.key === 'Enter') go.click(); });
 }
 
-async function submitEmail(input, btn) {
+// בלי לחכות לשרת: המייל נשמר במכשיר, הזיהוי יוצא ברקע, ואם זה סקר ממכשיר אחר הוא מצטרף (mergeResume)
+function submitEmail(input) {
   const email = input.value.trim();
   if (!validEmail(email)) { showToast('בדקו את כתובת המייל', 'warning'); input.focus(); return; }
-  if (S.serverMode) {
-    const content = [...btn.childNodes];
-    btn.disabled = true;
-    btn.textContent = 'רגע…';
-    try {
-      const res = await apiPost('identify', { email, rid: getRid() });
-      if (!res.success) throw new ServerSaid(res.message);
-      if (res.status === 'resume') applyResume(res);
-    } catch (e) {
-      btn.disabled = false;
-      btn.replaceChildren(...content);
-      showToast(e instanceof ServerSaid && e.message ? e.message : 'לא הצליח. בדקו את החיבור ונסו שוב', 'error', 5000);
-      return;
-    }
-  }
   localStorage.setItem(EMAIL_KEY, email);
+  enqueue({ type: 'identify', email });
   goCategories(); // קודם רואים את כל הנושאים
 }
 
-// אותו מייל ממכשיר אחר: ממשיכים את אותו סקר. מהשרת מגיעה רק ההתקדמות (אילו נושאים נשמרו),
-// ומ"קצת עליך" רק מה שקובע אילו נושאים מוצגים. התשובות עצמן נשארות בשרת.
-function applyResume(res) {
-  Object.keys(localStorage).filter(k => k.startsWith('np_draft_')).forEach(k => localStorage.removeItem(k));
-  localStorage.removeItem(RAFFLE_KEY);
-  S.raffleEntered = false;
+// ── שמירה ברקע ──────────────────────────────────────────
+// Apps Script עונה בדרך כלל אחרי שנייה וחצי, ובערך פעם בשלוש אחרי 10 עד 40 שניות. לכן שום מעבר לא מחכה לו:
+// כל שמירה נכנסת לתור שנשמר במכשיר ונשלח ברקע לפי הסדר. אין רשת? ננסה שוב, וגם בכניסה הבאה לאתר.
+// כל פעולה זוכרת את קוד העונה שלה; אם המייל התגלה כשייך לסקר ממכשיר אחר, הפעולות עוברות אליו.
+
+function loadOutbox() {
+  try { Q.items = JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]'); } catch { Q.items = []; }
+}
+
+function saveOutbox() {
+  localStorage.setItem(OUTBOX_KEY, JSON.stringify(Q.items));
+}
+
+function enqueue(op) {
+  if (!S.serverMode) return;
+  op.rid = op.rid || getRid();
+  // שמירה חדשה של אותו נושא מחליפה שמירה קודמת שעוד לא יצאה
+  if (op.type === 'submit') Q.items = Q.items.filter(x => x === Q.sending || !(x.type === 'submit' && x.chapter === op.chapter && x.rid === op.rid));
+  Q.items.push(op);
+  saveOutbox();
+  flush();
+}
+
+function opBody(op) {
+  if (op.type === 'identify') return { action: 'identify', email: op.email, rid: op.rid };
+  if (op.type === 'discard') return { action: 'discard', rid: op.rid };
+  return { action: 'submitChapter', rid: op.rid, chapter: op.chapter, answers: op.answers };
+}
+
+async function flush() {
+  if (Q.busy || !S.serverMode || !Q.items.length) return;
+  Q.busy = true;
+  clearTimeout(Q.timer);
+  try {
+    while (Q.items.length) {
+      const op = Q.items[0];
+      Q.sending = op;
+      let res = null;
+      try { const b = opBody(op); res = await apiPost(b.action, b); } catch (e) { /* רשת: ננסה שוב */ }
+      Q.sending = null;
+      const final = res && (res.success || FINAL_ERROR.test(res.message || ''));
+      if (!final) {
+        Q.fails++;
+        if (Q.fails === 3 && !Q.warned) { Q.warned = true; showToast('השמירה לשרת מתעכבת. התשובות שמורות במכשיר ויישלחו לבד', 'info', 5000); }
+        Q.timer = setTimeout(flush, Math.min(60000, 2000 * 2 ** Math.min(Q.fails, 5)));
+        return;
+      }
+      const i = Q.items.indexOf(op); // בינתיים אולי התחילו מחדש והתור התחלף
+      if (i >= 0) Q.items.splice(i, 1);
+      saveOutbox();
+      if (Q.warned) showToast('הכול נשמר', 'success', 2500);
+      Q.fails = 0;
+      Q.warned = false;
+      if (!res.success) showToast(/סגור/.test(res.message) ? 'הסקר נסגר למענה, ומה שענית עכשיו לא נשמר' : res.message, 'error', 6000);
+      else if (op.type === 'identify' && res.status === 'resume') mergeResume(op.rid, res);
+    }
+  } finally {
+    Q.busy = false;
+  }
+}
+
+// מחכה שכל התור יגיע לשרת (לפני הרשמה להגרלה, שבה השרת בודק שהכול נענה)
+async function drain(ms) {
+  const until = Date.now() + ms;
+  while (Q.items.length && Date.now() < until) {
+    if (!Q.busy) { Q.fails = 0; flush(); }
+    await new Promise(r => setTimeout(r, 300));
+  }
+  return !Q.items.length;
+}
+
+// סוגרים את הדף באמצע שמירה: שולחים את התור גם בדרך שלא מחכה לתשובה. התור נשאר ויישלח שוב בכניסה הבאה
+// (שליחה כפולה לא מזיקה). פעולות שאחרי זיהוי מייל שעוד לא חזר נשארות לכניסה הבאה, כדי שלא יישמרו לקוד הלא נכון.
+function beaconOutbox() {
+  if (!S.serverMode || !Q.items.length || !navigator.sendBeacon) return;
+  for (const op of Q.items) {
+    if (!op.beaconed) {
+      navigator.sendBeacon(CONFIG.SCRIPT_URL, new Blob([JSON.stringify(opBody(op))], { type: 'text/plain;charset=UTF-8' }));
+      op.beaconed = true;
+    }
+    if (op.type === 'identify') break;
+  }
+  saveOutbox();
+}
+
+// אותו מייל כבר התחיל סקר במכשיר אחר: עוברים לסקר ההוא, ומה שנענה כאן בינתיים נשמר אליו.
+// מהשרת מגיעה רק ההתקדמות, ומ"קצת עליך" רק מה שקובע אילו נושאים מוצגים. התשובות עצמן נשארות בשרת.
+function mergeResume(localRid, res) {
+  if (getRid() !== localRid || res.rid === localRid) return; // בינתיים התחילו מחדש
   setRid(res.rid);
-  S.done = {};
-  S.remote = {};
+  Q.items.forEach(x => { if (x.rid === localRid) x.rid = res.rid; });
+  saveOutbox();
+  let added = 0;
   for (const [chId, d] of Object.entries(res.done || {})) {
+    if (S.done[chId]) continue; // נענה גם כאן: מה שנשלח מכאן יגבר
     S.done[chId] = d.ts || new Date().toISOString();
-    if (d.skipped) { setDraft(chId, { _skipped: 'כן' }); continue; }
-    const restored = chId === 'about' ? (res.profile || {}) : {};
-    if (Object.keys(restored).length) setDraft(chId, restored);
-    S.remote[chId] = JSON.stringify(restored);
+    if (d.skipped) setDraft(chId, { _skipped: 'כן' });
+    else {
+      const restored = chId === 'about' ? (res.profile || {}) : {};
+      if (Object.keys(restored).length) setDraft(chId, restored);
+      S.remote[chId] = JSON.stringify(restored);
+    }
+    added++;
   }
   localStorage.setItem(DONE_KEY, JSON.stringify(S.done));
   saveRemote();
-  const n = topicStats().done;
-  showToast('ברוכים השבים! ' + (n ? (n === 1 ? 'נושא אחד כבר שמור' : n + ' נושאים כבר שמורים') + ', ממשיכים' : 'ממשיכים מאיפה שעצרתם'), 'success', 3500);
+  if (!added) return;
+  showToast('ברוכים השבים! ' + (added === 1 ? 'נושא אחד כבר שמור' : added + ' נושאים כבר שמורים'), 'success', 3500);
+  if (S.view === 'categories') goCategories(); else updateProgress();
 }
+
 
 // "אמשיך אחר כך": אין מה לשלוח. כל נושא כבר שמור, וממשיכים מכל מכשיר עם אותו מייל
 function showLaterModal() {
@@ -970,21 +1043,14 @@ function showRestartModal() {
   openModal(modal);
 }
 
-async function restartAll(e) {
-  const b = e && e.currentTarget;
-  // בשרת: מסמנים את התשובות הקודמות כמבוטלות, אחרת העונה נספר פעמיים בתוצאות
-  if (S.serverMode && Object.keys(S.done).length) {
-    if (b) b.disabled = true;
-    try {
-      const res = await apiPost('discard', { rid: getRid() });
-      if (!res.success) throw new ServerSaid(res.message);
-    } catch (err) {
-      if (b) b.disabled = false;
-      showToast(err instanceof ServerSaid && err.message ? err.message : 'לא הצליח, בדקו את החיבור ונסו שוב', 'error');
-      return;
-    }
-  }
+function restartAll() {
+  // בשרת התשובות הקודמות מסומנות כמבוטלות, אחרת העונה נספר פעמיים. מה שעוד לא יצא מהתור כבר לא רלוונטי
+  const old = getRid();
+  const hadAnswers = Object.keys(S.done).length > 0;
   clearLocal();
+  Q.items = hadAnswers ? [{ type: 'discard', rid: old }] : [];
+  saveOutbox();
+  flush();
   closeModal();
   showToast('התחלנו דף חדש 🌱', 'success');
   goLanding();
@@ -1049,6 +1115,8 @@ function showRaffleModal() {
           b.disabled = true;
           b.textContent = 'נרשם…';
           try {
+            // השרת בודק שכל הנושאים נענו, אז קודם כל מה שבתור צריך להגיע אליו
+            if (!(await drain(45000))) throw new ServerSaid('חלק מהתשובות עוד לא הגיעו לשרת. בדקו את החיבור ונסו שוב');
             // POST: שם וטלפון לא נכנסים לכתובת (שנשמרת בלוגים)
             const res = await apiPost('enterRaffle', { rid: getRid(), name, phone });
             // ניסיון חוזר אחרי שההרשמה הראשונה כבר נקלטה מחזיר "כבר רשום": זו הצלחה
