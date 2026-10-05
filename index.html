@@ -100,10 +100,18 @@ async function init() {
     const res = await apiCall('getSurvey');
     if (res.open === false) return goClosed();
     if (res.success && res.survey && res.survey.chapters && res.survey.chapters.length) {
-      // "חובה" מגיע מהגיליון. גיליון שנזרע לפני שהעמודה נוספה לא שולח אותו, ואז לפי survey-data.js
+      // "חובה" מגיע מהגיליון. גיליון שנזרע לפני שהעמודה נוספה (10/2026) לא שולח אותו, ואז לפי survey-data.js.
+      // בגיליון כזה גם "קצת עליך" נלקח מהקוד, כי התיאור הישן שם ("הכול רשות") סותר את שאלות החובה.
+      // סנכרון אחד מ-setup.html מעדכן את הגיליון, ומשם הכול שוב מהגיליון.
+      const chs = res.survey.chapters;
+      if (chs.every(c => c.questions.every(q => q.required === undefined))) {
+        const i = chs.findIndex(c => c.id === 'about');
+        const about = window.SURVEY_DATA.chapters.find(c => c.id === 'about');
+        if (i >= 0 && about) chs[i] = about;
+      }
       const bundled = {};
       window.SURVEY_DATA.chapters.forEach(c => c.questions.forEach(q => { bundled[q.id] = q; }));
-      res.survey.chapters.forEach(c => c.questions.forEach(q => {
+      chs.forEach(c => c.questions.forEach(q => {
         if (q.required === undefined) q.required = !!(bundled[q.id] && bundled[q.id].required);
       }));
       // השאלות מהגיליון (שם הצוות עורך), הטקסטים הכלליים (פתיח, שו"ת, הגרלה, תחומים) מהקוד
