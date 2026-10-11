@@ -7,7 +7,8 @@ const crypto = require('crypto');
 // ── מוק של הגיליון ─────────────────────────────────────────
 // מחקה את ההמרות של Sheets: גרש בהתחלה = טקסט, מחרוזת מספרית = מספר (ה-0 נאכל), '=' = נוסחה
 function toCell(v) {
-  if (v instanceof Date || typeof v === 'number' || typeof v === 'boolean') return v;
+  // תאריך מתוך appscript.gs נוצר בהקשר אחר של vm, אז instanceof Date לא מזהה אותו
+  if (Object.prototype.toString.call(v) === '[object Date]' || typeof v === 'number' || typeof v === 'boolean') return v;
   if (v === null || v === undefined) return '';
   v = String(v);
   if (v.startsWith("'")) return v.slice(1);
@@ -43,8 +44,11 @@ class Sheet {
   }
   getDataRange() { return new Range(this, 1, 1, Math.max(1, this.getLastRow()), Math.max(1, this.getLastColumn())); }
   clearContents() { this.rows = []; }
+  clear() { this.rows = []; this.formats = {}; }
   deleteRow(r) { this.rows.splice(r - 1, 1); }
   setFrozenRows(n) { this.frozen = n; }
+  setFrozenColumns(n) { this.frozenCols = n; }
+  setRightToLeft(v) { this.rtl = v; }
   setColumnWidth() {}
   getProtections() { return this.protections; }
   protect() { const p = { warningOnly: false, setDescription() { return this; }, setWarningOnly(w) { this.warningOnly = w; return this; } }; this.protections.push(p); return p; }
@@ -72,6 +76,15 @@ class Range {
     return this;
   }
   setValue(v) { return this.setValues([[v]]); }
+  // עיצוב: נשמר רק כדי שהבדיקות יוכלו לוודא שהוא נקרא
+  fmt(k, v) { (this.sheet.formats = this.sheet.formats || {})[k + '@' + [this.r, this.c, this.nr, this.nc]] = v; return this; }
+  setFontWeight(v) { return this.fmt('fontWeight', v); }
+  setVerticalAlignment(v) { return this.fmt('vAlign', v); }
+  setBackgrounds(v) { return this.fmt('backgrounds', v); }
+  setFontColors(v) { return this.fmt('fontColors', v); }
+  setWrap(v) { return this.fmt('wrap', v); }
+  setWrapStrategy(v) { return this.fmt('wrapStrategy', v); }
+  setNumberFormat(v) { return this.fmt('numberFormat', v); }
   sort(col) {
     const rows = this.getValues();
     const k = col - this.c;
@@ -97,10 +110,11 @@ const triggers = [];
 const logs = [];
 
 const ctx = {
-  SpreadsheetApp: { openById: () => SS, ProtectionType: { SHEET: 'SHEET' } },
+  SpreadsheetApp: { openById: () => SS, ProtectionType: { SHEET: 'SHEET' }, WrapStrategy: { CLIP: 'CLIP', WRAP: 'WRAP', OVERFLOW: 'OVERFLOW' } },
   LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
   Utilities: {
     getUuid: () => crypto.randomUUID(),
+    formatDate: (d, tz, f) => { const x = new Date(d), p = n => String(n).padStart(2, '0'); return f.replace('dd', p(x.getDate())).replace('MM', p(x.getMonth() + 1)).replace('yyyy', x.getFullYear()).replace('HH', p(x.getHours())).replace('mm', p(x.getMinutes())); },
     computeHmacSha256Signature: (value, key) => Array.from(crypto.createHmac('sha256', key).update(value, 'utf8').digest()).map(b => (b > 127 ? b - 256 : b)),
     computeDigest: (alg, value) => Array.from(crypto.createHash('sha256').update(value, 'utf8').digest()).map(b => (b > 127 ? b - 256 : b)),
     DigestAlgorithm: { SHA_256: 'SHA_256' },

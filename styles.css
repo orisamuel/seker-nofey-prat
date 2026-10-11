@@ -1090,6 +1090,51 @@ textarea.txt-input { min-height: 104px; resize: vertical; }
 
 mark { background: var(--ochre-soft); color: inherit; border-radius: 3px; padding: 0 2px; }
 
+/* ── דשבורד: לפי עונה ולפי שאלה ───────────────────────── */
+
+.step-nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+
+.step-nav .small { font-variant-numeric: tabular-nums; }
+
+.person-name { font-size: 40px; line-height: 1.05; margin-bottom: 4px; }
+
+.person-details { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin-top: 14px; font-size: 15px; }
+
+.person-details dt { color: var(--muted); }
+
+.person-details dd { font-weight: 600; }
+
+.person-topic { display: flex; align-items: center; gap: 8px; font-size: 19px; margin-bottom: 12px; }
+
+.person-topic svg.ic { color: var(--teal); }
+
+.person-topic small { margin-inline-start: auto; font-weight: 400; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.qa-list { display: grid; }
+
+.qa-item { padding: 10px 0; border-top: 1px solid var(--line); }
+
+.qa-item:first-child { border-top: none; padding-top: 0; }
+
+.qa-q { font-size: 14px; color: var(--muted); line-height: 1.45; margin-bottom: 5px; }
+
+.qa-a { font-size: 15.5px; line-height: 1.5; }
+
+.ans-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.ans-tags { display: inline-flex; flex-wrap: wrap; gap: 5px; }
+
+.ans-rank { padding-inline-start: 20px; }
+
+.byq-row { padding: 11px 0; border-top: 1px solid var(--line); }
+
+.byq-who {
+  display: block; margin-top: 5px; padding: 0;
+  border: none; background: none; text-align: right;
+  font-size: 13.5px; color: var(--teal-deep);
+  text-decoration: underline; text-decoration-color: rgba(14, 107, 91, .3); text-underline-offset: 3px;
+}
+
 /* ── דף הניהול ─────────────────────────────────────────── */
 
 .login-card { max-width: 400px; margin: 60px auto; }

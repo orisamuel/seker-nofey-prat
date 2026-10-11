@@ -34,6 +34,8 @@ const D = {
   identified: 0,                 // כמה עברו את שלב המייל
   compareDim: 'about_age', compareQ: '',   // השוואה בין קבוצות
   openSearch: '', openTopic: '',           // תשובות פתוחות
+  personRid: '', personSearch: '',         // לפי עונה
+  byQ: '',                                 // לפי שאלה
 };
 
 // מה מוצג בזמן הטעינה: שלבים אמיתיים, ובין לבין כמה בשביל ההומור (רעיון של אורי), כדי שהמתנה ארוכה תרגיש סבירה
@@ -91,13 +93,18 @@ async function load(password) {
     // מיזוג לפי עונה: תשובה אחרונה גוברת. דילוג (_skipped) נספר בנפרד ולא כמענה
     D.respondents = {};
     D.rows.forEach(r => {
-      const p = D.respondents[r.rid] = D.respondents[r.rid] || { chapters: {}, skipped: {}, answers: {}, first: r.ts };
+      const p = D.respondents[r.rid] = D.respondents[r.rid] || { rid: r.rid, chapters: {}, skipped: {}, answers: {}, first: r.ts, last: r.ts };
       if (r.ts < p.first) p.first = r.ts;
+      if (r.ts > p.last) p.last = r.ts;
       const realKeys = Object.keys(r.answers).filter(k => !k.startsWith('_'));
       if (realKeys.length) { p.chapters[r.chapter] = r.ts; delete p.skipped[r.chapter]; }
       else if (r.answers._skipped) p.skipped[r.chapter] = r.ts;
       realKeys.forEach(k => p.answers[k] = r.answers[k]);
     });
+    // מספור לפי סדר ההתחלה, כמו העמודה "#" בטאב "תוצאות" בגיליון
+    Object.values(D.respondents)
+      .sort((a, b) => (a.first < b.first ? -1 : a.first > b.first ? 1 : a.rid < b.rid ? -1 : 1))
+      .forEach((p, i) => { p.num = i + 1; });
     render();
   } catch (e) {
     app.replaceChildren(el('div', { class: 'card center' },
@@ -180,7 +187,8 @@ function render() {
     class: 'pill-tab' + (D.currentTab === id ? ' sel' : ''),
     onclick: () => { D.currentTab = id; render(); }
   }, ...label);
-  tabs.append(mkTab('overview', 'מבט על'), mkTab('compare', 'השוואה בין קבוצות'), mkTab('open', 'תשובות פתוחות'));
+  tabs.append(mkTab('overview', 'מבט על'), mkTab('person', 'לפי עונה'), mkTab('byq', 'לפי שאלה'),
+    mkTab('compare', 'השוואה בין קבוצות'), mkTab('open', 'תשובות פתוחות'));
   D.survey.chapters.forEach(ch => tabs.append(mkTab(ch.id, icon(ch.icon || 'list-checks'), ch.title)));
 
   const kids = [
@@ -197,6 +205,8 @@ function render() {
   if (D.currentTab === 'overview') kids.push(renderOverview(list));
   else if (D.currentTab === 'compare') kids.push(renderCompare(list));
   else if (D.currentTab === 'open') kids.push(renderOpen(list));
+  else if (D.currentTab === 'person') kids.push(renderPerson(list));
+  else if (D.currentTab === 'byq') kids.push(renderByQuestion(list));
   else {
     const ch = D.survey.chapters.find(c => c.id === D.currentTab);
     if (ch) kids.push(renderChapter(ch, list));
@@ -692,6 +702,168 @@ function renderOpen(list) {
       el('div', { class: 'open-controls' }, search, topicSel),
       el('p', { class: 'small muted mt' }, 'מילים שחוזרות (לחיצה מחפשת):'), chips, count),
     results);
+}
+
+// ── לפי עונה / לפי שאלה: התשובות עצמן, בלי חישובים ─────────
+
+const hasVal = v => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && !v.length);
+
+function fmtTime(ts) {
+  const d = new Date(ts), p = n => String(n).padStart(2, '0');
+  return p(d.getDate()) + '/' + p(d.getMonth() + 1) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+const personName = p => String(p.answers.about_name || '').trim();
+
+// "#12 · דנה כהן" (או "#12 · בלי שם")
+const personTitle = p => '#' + p.num + ' · ' + (personName(p) || 'בלי שם');
+
+// גיל, ותק ומגורים בשורה אחת, ליד כל תשובה
+function personBrief(p) {
+  return ['about_age', 'about_seniority', 'about_housing'].map(k => p.answers[k]).filter(hasVal).join(' · ');
+}
+
+// תשובה אחת לתצוגה: סולם עם צבע לפי הציון, בחירה מרובה כתגיות, דירוג ממוספר, טקסט כמו שנכתב
+function answerView(v, q) {
+  if (q.type === 'scale' && typeof v === 'number') {
+    const n = normScore(v, q);
+    const cls = n >= 6 / 9 ? 'avg-good' : n >= 4 / 9 ? 'avg-mid' : 'avg-low';
+    return el('span', { class: 'avg-chip ' + cls }, v + ' מתוך ' + (q.max || 10));
+  }
+  if (Array.isArray(v)) {
+    if (q.type === 'rank') return el('ol', { class: 'ans-rank' }, ...v.map(o => el('li', {}, o)));
+    return el('span', { class: 'ans-tags' }, ...v.map(o => el('span', { class: 'tag' }, o)));
+  }
+  if (v === DONT_KNOW) return el('span', { class: 'tag' }, DONT_KNOW);
+  return el('span', { class: 'ans-text' }, String(v));
+}
+
+// כפתורי הקודם/הבא ו"3 מתוך 80"
+function stepNav(i, n, go) {
+  return el('div', { class: 'step-nav' },
+    el('button', { class: 'btn btn-ghost btn-sm', disabled: i <= 0, onclick: () => go(-1) }, icon('arrow-right'), 'הקודם'),
+    el('span', { class: 'small muted' }, n ? (i + 1) + ' מתוך ' + n : ''),
+    el('button', { class: 'btn btn-ghost btn-sm', disabled: i < 0 || i >= n - 1, onclick: () => go(1) }, 'הבא', icon('arrow-left')));
+}
+
+// הגיליון: אותן תשובות בטבלה אחת. הלחיצה גם מבקשת מהשרת לעדכן את הטאב (בלי לחכות לו)
+function sheetHint() {
+  if (!CONFIG.SHEETS_URL) return null;
+  return el('p', { class: 'small muted mt' }, 'כל התשובות גם בגיליון, שורה לכל עונה: ',
+    el('a', {
+      href: CONFIG.SHEETS_URL, target: '_blank', rel: 'noopener',
+      onclick: () => { apiPost('refreshResults', { password: sessionStorage.getItem('np_dash_pw') || '' }).catch(() => {}); },
+    }, 'טאב "תוצאות"'), '.');
+}
+
+function goToPerson(rid) {
+  D.currentTab = 'person'; D.personRid = rid; D.personSearch = '';
+  render();
+  window.scrollTo(0, 0);
+}
+
+function renderPerson(list) {
+  const people = list.slice().sort((a, b) => a.num - b.num);
+  if (!people.length) return el('div', { class: 'card center muted' }, 'אין עדיין עונים' + (D.filter ? ' בפילוח הזה' : ''));
+  const key = p => ('#' + p.num + ' ' + personName(p) + ' ' + p.rid).toLowerCase();
+  const matches = () => { const t = D.personSearch.trim().toLowerCase().replace(/^#/, ''); return t ? people.filter(p => key(p).includes(t)) : people; };
+
+  const search = el('input', { class: 'txt-input', type: 'search', placeholder: 'חיפוש לפי שם, מספר או קוד', 'aria-label': 'חיפוש עונה' });
+  search.value = D.personSearch;
+  const sel = el('select', { class: 'txt-input', 'aria-label': 'עונה' });
+  const nav = el('div', {});
+  const body = el('div', {});
+  const controls = el('div', { class: 'card' }, el('div', { class: 'open-controls' }, search, sel), nav, sheetHint());
+
+  const draw = () => {
+    const shown = matches();
+    if (!shown.some(p => p.rid === D.personRid)) D.personRid = shown.length ? shown[0].rid : '';
+    const i = shown.findIndex(p => p.rid === D.personRid);
+    sel.replaceChildren(...shown.map(p => el('option', { value: p.rid }, personTitle(p) + (personBrief(p) ? ' · ' + personBrief(p) : ''))));
+    sel.value = D.personRid;
+    nav.replaceChildren(stepNav(i, shown.length, step));
+    if (i < 0) { body.replaceChildren(el('div', { class: 'card center muted' }, 'אין עונה שמתאים לחיפוש')); return; }
+    body.replaceChildren(...personView(shown[i]),
+      // בסוף התשובות: ממשיכים לעונה הבא בלי לגלול למעלה
+      i < shown.length - 1 ? el('div', { class: 'center' }, el('button', { class: 'btn btn-ghost', onclick: () => { step(1); controls.scrollIntoView({ block: 'start' }); } }, 'לעונה הבא', icon('arrow-left'))) : null);
+  };
+  const step = d => {
+    const shown = matches();
+    const n = shown[shown.findIndex(p => p.rid === D.personRid) + d];
+    if (n) { D.personRid = n.rid; draw(); }
+  };
+  search.addEventListener('input', () => { D.personSearch = search.value; draw(); });
+  sel.addEventListener('change', () => { D.personRid = sel.value; draw(); });
+  draw();
+  return el('div', {}, controls, body);
+}
+
+// עונה אחד: שם ופרטים, ואז כל הנושאים שענה עליהם לפי הסדר בסקר
+function personView(p) {
+  const rel = relevantTopics(p);
+  const skipped = topicOrder().filter(ch => p.skipped[ch.id] && !p.chapters[ch.id]);
+  const notYet = rel.filter(ch => !isDone(p, ch.id));
+  const done = rel.length - notYet.length;
+  const about = D.survey.chapters.find(c => c.id === 'about');
+  const details = (about ? about.questions : []).filter(q => q.id !== 'about_name' && hasVal(p.answers[q.id]));
+
+  const head = el('div', { class: 'card person-head' },
+    el('h2', { class: 'person-name' }, personName(p) || 'בלי שם'),
+    el('p', { class: 'small muted' }, '#' + p.num + ' · קוד ' + p.rid + ' · התחיל ' + fmtTime(p.first) + (p.last !== p.first ? ' · עדכון אחרון ' + fmtTime(p.last) : '')),
+    details.length
+      ? el('dl', { class: 'person-details' }, ...details.flatMap(q => [el('dt', {}, DIM_LABEL[q.id] || q.text), el('dd', {}, Array.isArray(p.answers[q.id]) ? p.answers[q.id].join(', ') : String(p.answers[q.id]))]))
+      : el('p', { class: 'small muted mt' }, '"קצת עליך" עוד לא מולא'),
+    el('p', { class: 'small mt' }, el('b', {}, 'נושאים: '), done + ' מתוך ' + rel.length + ' שרלוונטיים לפי הפרופיל'),
+    skipped.length ? el('p', { class: 'small muted' }, 'סומן כלא רלוונטי: ' + skipped.map(ch => ch.title).join(', ')) : null,
+    notYet.length ? el('p', { class: 'small muted' }, 'עוד לא נענה: ' + notYet.map(ch => ch.title).join(', ')) : null);
+
+  const cards = topicOrder().filter(ch => p.chapters[ch.id]).map(ch => {
+    const qs = withMore(ch).filter(q => hasVal(p.answers[q.id]));
+    return el('div', { class: 'card' },
+      el('h3', { class: 'person-topic' }, icon(ch.icon || 'list-checks'), ch.title, el('small', {}, fmtTime(p.chapters[ch.id]))),
+      qs.length
+        ? el('div', { class: 'qa-list' }, ...qs.map(q => el('div', { class: 'qa-item' }, el('div', { class: 'qa-q' }, q.text), el('div', { class: 'qa-a' }, answerView(p.answers[q.id], q)))))
+        : el('p', { class: 'small muted' }, 'נשמר בלי תשובות'));
+  });
+  return [head, ...cards];
+}
+
+// כל השאלות שאפשר לבחור, לפי הסדר בסקר. בלי השם (הוא מופיע ליד כל תשובה)
+function allQuestions() {
+  const about = D.survey.chapters.filter(c => c.id === 'about');
+  return about.concat(topicOrder()).flatMap(ch => withMore(ch).filter(q => q.id !== 'about_name').map(q => ({ ch, q })));
+}
+
+function renderByQuestion(list) {
+  const all = allQuestions();
+  if (!all.length) return el('div', { class: 'card muted' }, 'אין שאלות');
+  if (!all.some(x => x.q.id === D.byQ)) D.byQ = all[0].q.id;
+  const i = all.findIndex(x => x.q.id === D.byQ);
+  const { ch, q } = all[i];
+  const go = d => { const n = all[i + d]; if (n) { D.byQ = n.q.id; render(); } };
+
+  const sel = el('select', { class: 'txt-input', 'aria-label': 'שאלה', onchange: e => { D.byQ = e.target.value; render(); } },
+    ...D.survey.chapters.filter(c => c.id === 'about').concat(topicOrder()).map(c => {
+      const items = all.filter(x => x.ch === c);
+      return items.length ? el('optgroup', { label: c.title }, ...items.map(x => el('option', { value: x.q.id }, shortText(x.q.text, 80)))) : null;
+    }));
+  sel.value = D.byQ;
+
+  const people = list.filter(p => hasVal(p.answers[q.id])).sort((a, b) => a.num - b.num);
+  const reached = list.filter(p => p.chapters[ch.id]).length;
+  const card = el('div', { class: 'card' },
+    el('p', { class: 'small muted' }, ch.title),
+    el('p', { class: 'q-text' }, q.text),
+    el('p', { class: 'small muted mb' }, people.length + ' ענו' + (reached > people.length ? ', מתוך ' + reached + ' שענו על הנושא' : '')));
+  if (!people.length) card.append(el('p', { class: 'muted small' }, 'אין תשובות עדיין' + (D.filter ? ' בפילוח הזה' : '')));
+  people.forEach(p => card.append(el('div', { class: 'byq-row' },
+    el('div', { class: 'qa-a' }, answerView(p.answers[q.id], q)),
+    el('button', { class: 'byq-who', title: 'כל התשובות של העונה הזה', onclick: () => goToPerson(p.rid) },
+      personTitle(p) + (personBrief(p) ? ' · ' + personBrief(p) : '')))));
+
+  return el('div', {},
+    el('div', { class: 'card' }, sel, stepNav(i, all.length, go), sheetHint()),
+    card);
 }
 
 // ── נושא בודד ────────────────────────────────────────────

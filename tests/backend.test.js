@@ -80,8 +80,7 @@ function normCond(c) {
   return { q: c.q, vals: c.vals || c.in || c.any || c.notIn, neg: !!(c.neg || c.notIn) };
 }
 check('meta stored', back.meta && back.meta.version === SURVEY.meta.version);
-const flat = SS.getSheetByName('תוצאות');
-check('flat headers: one column per question', flat.getLastColumn() === 2 + SURVEY.chapters.reduce((a, c) => a + c.questions.length, 0), flat.getLastColumn());
+check('results tab is not built on save (only by the trigger or the dashboard)', !SS.getSheetByName('תוצאות'));
 
 // ── 4. הגשות ──
 const A = 'ABCDEFGH', B = 'BCDEFGHJ';
@@ -91,22 +90,62 @@ r = post({ action: 'submitChapter', rid: A, chapter: 'community', answers: { com
 check('submit community', r.success, r);
 r = post({ action: 'submitChapter', rid: A, chapter: 'budget', answers: { _skipped: 'כן' } });
 check('skip budget', r.success, r);
-const headers = flat.rows[0];
-const rowA = flat.rows.find(x => x[0] === A);
-check('flat row for A', !!rowA);
-check('formula injection neutralized', rowA[headers.indexOf('about_name')] === '=HYPERLINK("x")', rowA[headers.indexOf('about_name')]);
-check('multi joined', rowA[headers.indexOf('comm_budget3')] === 'נוער | מבוגרים | קליטת פנים');
-check('scale numeric', rowA[headers.indexOf('comm_belong')] === 6);
-check('_skipped not in flat', !headers.includes('_skipped'));
 r = post({ action: 'submitChapter', rid: A, chapter: 'community', answers: { comm_belong: 7 } });
-check('update keeps one row per rid', flat.rows.filter(x => x[0] === A).length === 1 && flat.rows.find(x => x[0] === A)[headers.indexOf('comm_belong')] === 7);
-check('update keeps other answers', flat.rows.find(x => x[0] === A)[headers.indexOf('comm_budget3')] === 'נוער | מבוגרים | קליטת פנים');
+check('second save of a topic', r.success, r);
 r = post({ action: 'submitChapter', rid: 'bad', chapter: 'x', answers: {} });
 check('bad rid rejected', !r.success);
 r = post({ action: 'submitChapter', rid: A, chapter: '_בוטל', answers: {} });
 check('system chapter name rejected', !r.success);
 r = post({ action: 'submitChapter', rid: A, chapter: 'community', answers: { brand_new_q: 'x' } });
-check('new question column added on the fly', r.success && flat.rows[0].includes('brand_new_q'), r);
+check('unknown question saved', r.success, r);
+post({ action: 'submitChapter', rid: A, chapter: 'post', answers: { post_hours: 'לא יודע/ת', post_best_hours: '17-19' } });
+post({ action: 'submitChapter', rid: A, chapter: 'lib', answers: { lib_services: '10' } });
+check('submits do not touch the results tab', !SS.getSheetByName('תוצאות'));
+
+// ── 4ב. טאב "תוצאות": כל התשובות בטבלה אחת, עם נוסח השאלות ──
+r = post({ action: 'refreshResults', password: 'nope' });
+check('refresh results needs the password', !r.success && !SS.getSheetByName('תוצאות'), r);
+r = post({ action: 'refreshResults', password: pw() });
+check('refresh results builds the tab', r.success && r.respondents === 1, r);
+const flat = SS.getSheetByName('תוצאות');
+const top = flat.rows[0], headers = flat.rows[1];
+const rowOf = (rid) => flat.rows.slice(2).find(x => x[2] === rid);
+const colOf = (text, group) => {
+  // העמודה של שאלה לפי הנוסח, בתוך קבוצת הנושא שלה (כמה נושאים שואלים "משהו שהיית רוצה להוסיף?")
+  let g = '';
+  for (let j = 0; j < headers.length; j++) { if (top[j]) g = top[j]; if (headers[j] === text && (!group || g === group)) return j; }
+  return -1;
+};
+const rowA = rowOf(A);
+check('results: fixed columns', JSON.stringify(headers.slice(0, 7)) === JSON.stringify(['#', 'שם', 'קוד עונה', 'התחיל', 'עדכון אחרון', 'נושאים שעבר', 'סימן כלא רלוונטי']), headers.slice(0, 7));
+check('results: update time in the corner', /^עונים · עודכן \d\d\/\d\d\/\d{4} \d\d:\d\d$/.test(top[0]), top[0]);
+check('results: question text in the header, not ids', headers.includes('גיל') && headers.includes('עד כמה אתה מרגיש תחושת שייכות לקהילה?') && !headers.includes('about_age') && !headers.includes('comm_belong'), headers.slice(0, 14));
+const titlesInOrder = top.filter(Boolean).slice(1);
+const expectOrder = ['קצת עליך'].concat(SURVEY.meta.categories.flatMap(c => SURVEY.chapters.filter(ch => ch.cat === c.id).map(ch => ch.title)));
+check('results: topics in the order of the survey, about first', JSON.stringify(titlesInOrder) === JSON.stringify(expectOrder), titlesInOrder);
+check('results: one column per question, plus "more" per topic', headers.length === 7 + SURVEY.chapters.reduce((a, c) => a + c.questions.filter(q => q.id !== 'about_name').length + (['about', 'pub'].includes(c.id) ? 0 : 1), 0) + 1, headers.length);
+check('results: "more" question in each topic', headers.filter(h => h === 'משהו שהיית רוצה להוסיף?').length === SURVEY.chapters.filter(c => !['about', 'pub'].includes(c.id)).length);
+check('results: system keys hidden', !headers.includes('about_submitted') && !headers.includes('_skipped') && !headers.includes('שם מלא'));
+check('results: one row per respondent', flat.rows.length === 3 && rowA[0] === 1, flat.rows.length);
+check('results: name in its own column, formula neutralized', rowA[1] === '=HYPERLINK("x")', rowA[1]);
+const isDate = (x) => Object.prototype.toString.call(x) === '[object Date]';
+check('results: start and last update are dates', isDate(rowA[3]) && isDate(rowA[4]) && rowA[4] >= rowA[3]);
+check('results: skipped topic named', rowA[6] === 'תקציב היישוב', rowA[6]);
+check('results: progress against relevant topics', /^\d+ מתוך \d+$/.test(rowA[5]), rowA[5]);
+check('results: multi choice readable', rowA[colOf('בחר את 3 הנושאים שלדעתך נדרשים להקצאת כספים מהתקציב')] === 'נוער · מבוגרים · קליטת פנים', rowA[colOf('בחר את 3 הנושאים שלדעתך נדרשים להקצאת כספים מהתקציב')]);
+check('results: latest answer wins, scale stays a number', rowA[colOf('עד כמה אתה מרגיש תחושת שייכות לקהילה?')] === 7);
+check('results: kids', rowA[colOf('ילדים בבית')] === 'נוער (ז׳–י״ב)');
+check('results: dont-know kept as text', rowA[colOf('עד כמה אתה מרוצה משעות קבלת הקהל וחלוקת החבילות בדואר?')] === 'לא יודע/ת');
+check('results: number-looking text stays text', rowA[colOf('לאילו שירותים משמשת אתכם הספרייה?')] === '10' && rowA[colOf('באילו שעות יהיה לכם נוח יותר לאסוף חבילות?')] === '17-19', [rowA[colOf('לאילו שירותים משמשת אתכם הספרייה?')]]);
+check('results: unknown question kept, at the end of its topic', colOf('brand_new_q', 'קהילה') > colOf('עד כמה אתה מרגיש תחושת שייכות לקהילה?') && rowA[colOf('brand_new_q')] === 'x');
+check('results: frozen headers, right to left, formatted', flat.frozen === 2 && flat.frozenCols === 2 && flat.rtl === true && Object.keys(flat.formats).some(k => k.startsWith('backgrounds')));
+r = post({ action: 'refreshResults', password: pw() });
+check('results: no rebuild when nothing changed', r.success && r.fresh === true, r);
+ctx.keepWarm();
+check('trigger: nothing to rebuild either', flat.rows.length === 3);
+post({ action: 'submitChapter', rid: 'NEWRESP2', chapter: 'about', answers: { about_age: '26–35' } });
+ctx.keepWarm();
+check('trigger rebuilds after a new answer', flat.rows.length === 4 && rowOf('NEWRESP2')[0] === 2, flat.rows.length);
 
 // ── 5. מייל = זהות (בלי שליחה) ──
 // פעולות ההמשך הישנות (טלפון + קוד, קישור במייל) לא חשופות, ואין פעולה שמחזירה תשובות לפי קוד עונה
@@ -177,12 +216,14 @@ check('raffle phone keeps leading zero', raffle.rows.slice(1).every(x => String(
 
 // ── 7. התחלה מחדש ──
 post({ action: 'submitChapter', rid: B, chapter: 'community', answers: { comm_belong: 1 } });
-check('B in flat', flat.rows.some(x => x[0] === B));
+ctx.keepWarm();
+check('B in results', !!rowOf(B));
 r = post({ action: 'identify', email: 'b@example.com', rid: B });
 check('B identified', r.success && r.status === 'new', r);
 r = post({ action: 'discard', rid: B });
 check('discard ok', r.success, r);
-check('B removed from flat', !flat.rows.some(x => x[0] === B));
+ctx.keepWarm();
+check('B removed from results after discard', !rowOf(B) && !!rowOf(A));
 // אחרי "להתחיל מחדש" אותו מייל עובר לקוד העונה החדש, והסקר שבוטל לא חוזר
 const B2 = 'BBBBBBB2';
 r = post({ action: 'identify', email: 'b@example.com', rid: B2 });
@@ -281,7 +322,10 @@ check('inactive question hidden from the public survey', !pub.chapters.find(c =>
 check('meta saved and served', pub.meta.tagline === 'כותרת חדשה');
 const adm = post({ action: 'getAdmin', password: pw() }).survey;
 check('admin still sees hidden items', adm.chapters.find(c => c.id === 'zoo').active === false && adm.chapters.find(c => c.id === 'lib').questions[0].active === false);
-check('new question got a results column', SS.getSheetByName('תוצאות').rows[0].includes('post_x1'));
+ctx.keepWarm();
+check('results rebuilt after an admin save: new question has a column', SS.getSheetByName('תוצאות').rows[1].includes('007'), SS.getSheetByName('תוצאות').rows[1]);
+check('results: hidden topic without answers left out', !SS.getSheetByName('תוצאות').rows[0].includes('פינת חי'));
+check('results: hidden question with answers kept', SS.getSheetByName('תוצאות').rows[1].includes('לאילו שירותים משמשת אתכם הספרייה?'));
 // אימות: שום דבר לא נכתב כשיש שגיאה
 const before = JSON.stringify(SS.getSheetByName('שאלות').rows);
 const bad = (fn) => { const x = JSON.parse(JSON.stringify(adm)); fn(x); return post({ action: 'saveSurvey', survey: x, password: pw(), rev }); };

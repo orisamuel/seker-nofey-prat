@@ -82,10 +82,11 @@ function safeCell(v) {
   return v;
 }
 
-// טקסט מדף הניהול: מה שנראה כמו נוסחה, מספר או תאריך הגיליון היה הופך. גרש בהתחלה שומר אותו כמו שהוא
+// טקסט מדף הניהול או מתשובה: מה שנראה כמו נוסחה, מספר, שעה או תאריך ("17-19", "10:00") הגיליון היה הופך.
+// גרש בהתחלה שומר אותו כמו שהוא
 function textCell(v) {
   if (typeof v !== 'string') return v;
-  return /^[=+\-@']/.test(v) || /^[\d\s.,:\/]+$/.test(v) ? "'" + v : v;
+  return /^[=+\-@']/.test(v) || /^[\d\s.,:\/\-–]+$/.test(v) ? "'" + v : v;
 }
 
 // טאב חדש נוצר עם 26 עמודות, וטבלת התוצאות צריכה עמודה לכל שאלה. בלי זה הכתיבה נכשלת.
@@ -247,8 +248,11 @@ function setup() {
   Logger.log('מוכן. סיסמת הצוות (גם בטאב "הגדרות"): ' + settings.dashboardPassword);
 }
 
-// טריגר כל 10 דקות, מקצר את ההמתנה של הגולש הראשון אחרי שקט
-function keepWarm() { Logger.log('warm ' + new Date().toISOString()); }
+// טריגר כל 10 דקות, מקצר את ההמתנה של הגולש הראשון אחרי שקט, ומעדכן את טאב "תוצאות" אם נוספו תשובות
+function keepWarm() {
+  Logger.log('warm ' + new Date().toISOString());
+  try { buildResultsSheet(false); } catch (e) { Logger.log('results: ' + e); }
+}
 
 // ============================================================
 // מבנה הסקר: פרקים + שאלות
@@ -287,17 +291,12 @@ function getAdmin(password) {
   }
 }
 
-// כמה ענו על כל שאלה (מהטבלה השטוחה), כדי שבמחיקה יהיה ברור מה יוצא מהתוצאות
+// כמה ענו על כל שאלה, כדי שבמחיקה יהיה ברור מה יוצא מהתוצאות
 function answeredCounts() {
   const out = {};
-  const flat = getSpreadsheet().getSheetByName(T_FLAT);
-  if (!flat || flat.getLastRow() <= 1) return out;
-  const data = flat.getDataRange().getValues();
-  for (let j = 2; j < data[0].length; j++) {
-    let n = 0;
-    for (let i = 1; i < data.length; i++) if (data[i][j] !== '' && data[i][j] !== null) n++;
-    if (n) out[String(data[0][j])] = n;
-  }
+  mergedRespondents().forEach(function (p) {
+    Object.keys(p.answers).forEach(function (k) { if (hasAnswer(p.answers[k])) out[k] = (out[k] || 0) + 1; });
+  });
   return out;
 }
 
@@ -430,7 +429,6 @@ function writeSurveyTabs(survey) {
   ensureSheet(T_EMAILS, EMAIL_HEADERS);
   writeNoticeSheet();
   protectTabs();
-  rebuildFlatHeaders();
 }
 
 // במקום מדריך עריכה: הגיליון הוא מסד הנתונים, ועורכים רק בדף הניהול
@@ -440,10 +438,11 @@ function writeNoticeSheet() {
   if (old) ss.deleteSheet(old);
   const sheet = ss.getSheetByName(T_NOTICE) || ss.insertSheet(T_NOTICE);
   sheet.clearContents();
-  sheet.getRange(1, 1, 3, 1).setValues([
+  sheet.getRange(1, 1, 4, 1).setValues([
     ['הגיליון הזה הוא מסד הנתונים של הסקר. לא עורכים בו.'],
     ['שאלות, טקסטים והגדרות: בדף הניהול, ' + SITE + 'admin.html'],
     ['תוצאות: בדשבורד, ' + SITE + 'dashboard.html'],
+    ['כל התשובות בטבלה אחת: טאב "תוצאות", שורה לכל עונה ועמודה לכל שאלה. מתעדכן לבד כל 10 דקות, ומיד כשפותחים את הגיליון מהדשבורד.'],
   ]);
   sheet.setColumnWidth(1, 700);
 }
@@ -555,40 +554,173 @@ function getSurvey() {
 // תשובות
 // ============================================================
 
-// הטבלה השטוחה: עמודה לכל שאלה, שורה לכל עונה — נוחה לניתוח בגיליון
-function rebuildFlatHeaders() {
-  const survey = loadSurvey(true); // גם לשאלות מוסתרות יש עמודה
-  if (!survey) return;
-  const flat = ensureSheet(T_FLAT, ['קוד עונה', 'עדכון אחרון']);
-  const headers = ['קוד עונה', 'עדכון אחרון'];
-  survey.chapters.forEach(function (ch) {
-    ch.questions.forEach(function (q) { headers.push(q.id); });
+// ── טאב "תוצאות": כל התשובות בטבלה אחת שאפשר לקרוא ──────────
+// שורה לכל עונה, עמודה לכל שאלה. בראש כל עמודה הנושא ונוסח השאלה, ולא המזהה הטכני.
+// נבנה מחדש מהטאב הגולמי (שהוא המקור): בטריגר של כל 10 דקות, רק אם משהו השתנה, וכשפותחים
+// את הגיליון מהדשבורד. לא בכל שמירה, כדי ששמירת נושא תישאר מהירה.
+const RESULTS_FORMAT = 'v2'; // מעלים כשמשנים את מבנה הטאב, כדי שייבנה מחדש בהרצה הבאה
+const RESULTS_FIXED = ['#', 'שם', 'קוד עונה', 'התחיל', 'עדכון אחרון', 'נושאים שעבר', 'סימן כלא רלוונטי'];
+const RESULTS_WIDTHS = [40, 130, 92, 118, 118, 96, 170];
+const MORE_SKIP = { about: 1, pub: 1 };           // כמו withMore ב-utils.js
+const SYSTEM_KEYS = { about_submitted: 1, about_name: 1 }; // השם מופיע בעמודה קבועה
+// צבע לכל נושא, לסירוגין: כהה לשורת הנושא, בהיר לשורת השאלות
+const RESULTS_COLORS = [['#0E6B5B', '#DCEFE9'], ['#BF5533', '#F7E3DA'], ['#3F7A93', '#E1EDF3'], ['#6B7A2E', '#ECEFD9'], ['#8E5A86', '#F2E6F0'], ['#A87A16', '#F8EDD3']];
+
+function hasAnswer(v) {
+  return v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && !v.length);
+}
+
+// כל העונים, בלי מי שהתחיל מחדש, לפי סדר ההתחלה (כמו המספור בדשבורד). תשובה אחרונה גוברת
+function mergedRespondents(rawData) {
+  if (!rawData) {
+    const raw = getSpreadsheet().getSheetByName(T_RAW);
+    rawData = raw && raw.getLastRow() > 1 ? raw.getDataRange().getValues() : [[]];
+  }
+  const discarded = discardedRids(rawData);
+  const by = {};
+  for (let i = 1; i < rawData.length; i++) {
+    const rid = String(rawData[i][1]), chId = String(rawData[i][2]);
+    if (!rid || discarded[rid] || chId.charAt(0) === '_') continue;
+    const ts = new Date(rawData[i][0]);
+    const p = by[rid] = by[rid] || { rid: rid, first: ts, last: ts, answers: {}, chapters: {}, skipped: {}, qChapter: {} };
+    if (ts < p.first) p.first = ts;
+    if (ts > p.last) p.last = ts;
+    const ans = parseJsonSafe(String(rawData[i][3]), {});
+    const real = Object.keys(ans).filter(function (k) { return k.charAt(0) !== '_'; });
+    if (real.length) { p.chapters[chId] = true; delete p.skipped[chId]; }
+    else if (ans._skipped) p.skipped[chId] = true;
+    real.forEach(function (k) { p.answers[k] = ans[k]; p.qChapter[k] = chId; });
+  }
+  return Object.keys(by).map(function (k) { return by[k]; })
+    .sort(function (a, b) { return (a.first - b.first) || (a.rid < b.rid ? -1 : 1); });
+}
+
+// "קצת עליך" ואז הנושאים לפי סדר התחומים, כמו בסקר ובדשבורד
+function chaptersInOrder(survey) {
+  const cats = (survey.meta && survey.meta.categories) || [];
+  const topics = survey.chapters.filter(function (c) { return c.id !== 'about'; });
+  const ordered = [];
+  cats.forEach(function (cat) { topics.forEach(function (ch) { if (ch.cat === cat.id) ordered.push(ch); }); });
+  topics.forEach(function (ch) { if (ordered.indexOf(ch) === -1) ordered.push(ch); });
+  return survey.chapters.filter(function (c) { return c.id === 'about'; }).concat(ordered);
+}
+
+// העמודות, בקבוצה לכל נושא. שאלה או נושא מוסתרים נכנסים רק אם יש עליהם תשובות,
+// וגם תשובות לשאלות שנמחקו מהשאלון לא נעלמות (בסוף הנושא שלהן, עם המזהה)
+function resultGroups(survey, people) {
+  const used = {};
+  people.forEach(function (p) {
+    Object.keys(p.answers).forEach(function (k) { if (!SYSTEM_KEYS[k] && hasAnswer(p.answers[k])) used[k] = p.qChapter[k]; });
   });
-  const existing = flat.getLastColumn() ? flat.getRange(1, 1, 1, flat.getLastColumn()).getValues()[0] : [];
-  // מוסיפים רק עמודות חדשות — לא מוחקים נתונים קיימים
-  const missing = headers.filter(function (h) { return existing.indexOf(h) === -1; });
-  if (existing.length === 0) {
-    ensureCols(flat, headers.length);
-    flat.getRange(1, 1, 1, headers.length).setValues([headers]);
-  } else if (missing.length) {
-    ensureCols(flat, existing.length + missing.length);
-    flat.getRange(1, existing.length + 1, 1, missing.length).setValues([missing]);
-  }
-  flat.setFrozenRows(1);
+  const seen = {}, groups = [];
+  const addGroup = function (title, chId, cols) {
+    cols.forEach(function (c) { seen[c.id] = true; });
+    Object.keys(used).forEach(function (k) { if (!seen[k] && used[k] === chId) { cols.push({ id: k, text: k }); seen[k] = true; } });
+    if (cols.length) groups.push({ title: title, cols: cols });
+  };
+  chaptersInOrder(survey).forEach(function (ch) {
+    const off = ch.active === false;
+    const cols = ch.questions.filter(function (q) { return !SYSTEM_KEYS[q.id] && (used[q.id] || (!off && q.active !== false)); })
+      .map(function (q) { return { id: q.id, text: q.text, type: q.type }; });
+    const more = ch.id + '_more';
+    if (!MORE_SKIP[ch.id] && !cols.some(function (c) { return c.id === more; }) && (used[more] || !off)) {
+      cols.push({ id: more, text: 'משהו שהיית רוצה להוסיף?', type: 'textarea' });
+    }
+    addGroup(ch.title, ch.id, cols);
+  });
+  // נושא שנמחק מהשאלון ויש עליו תשובות
+  Object.keys(used).forEach(function (k) {
+    if (!seen[k]) addGroup(used[k], used[k], []);
+  });
+  return groups;
 }
 
-function flatValue(v) {
-  if (Array.isArray(v)) return safeCell(v.join(' | '));
-  return v === undefined || v === null ? '' : safeCell(v);
+// ערך לתא: מספר נשאר מספר (אפשר לחשב ממוצע בגיליון), בחירה מרובה מופרדת בנקודה, דירוג ממוספר
+function resultCell(v, col) {
+  if (!hasAnswer(v)) return '';
+  if (Array.isArray(v)) {
+    return textCell(col && col.type === 'rank'
+      ? v.map(function (o, i) { return (i + 1) + '. ' + o; }).join(' · ')
+      : v.join(' · '));
+  }
+  if (typeof v === 'number' || typeof v === 'boolean') return v;
+  return textCell(String(v));
 }
 
-function findRidRow(flat, rid) {
-  if (flat.getLastRow() <= 1) return -1;
-  const rids = flat.getRange(2, 1, flat.getLastRow() - 1, 1).getValues();
-  for (let i = 0; i < rids.length; i++) {
-    if (String(rids[i][0]) === rid) return i + 2;
+// force: לבנות גם אם לא השתנה כלום מאז הפעם הקודמת
+function buildResultsSheet(force) {
+  const raw = getSpreadsheet().getSheetByName(T_RAW);
+  const settings = getSettings();
+  const key = [RESULTS_FORMAT, raw ? raw.getLastRow() : 0, settings.surveyRev || ''].join('|');
+  const props = PropertiesService.getScriptProperties();
+  if (!force && props.getProperty('RESULTS_KEY') === key) return { success: true, fresh: true };
+  const cache = CacheService.getScriptCache();
+  if (cache.get('results_building')) return { success: true, busy: true }; // בנייה אחרת כבר רצה
+  cache.put('results_building', '1', 120);
+  try {
+    const survey = loadSurvey(true);
+    if (!survey) return { success: false, message: 'השאלון עוד לא נשמר' };
+    const people = mergedRespondents(raw && raw.getLastRow() > 1 ? raw.getDataRange().getValues() : [[]]);
+    const ss = getSpreadsheet();
+    let sheet = ss.getSheetByName(T_FLAT);
+    if (!sheet) { sheet = ss.insertSheet(T_FLAT); protectTabs(); }
+    writeResults(sheet, survey, people);
+    props.setProperty('RESULTS_KEY', key);
+    return { success: true, respondents: people.length };
+  } finally {
+    cache.remove('results_building');
   }
-  return -1;
+}
+
+function writeResults(sheet, survey, people) {
+  const groups = resultGroups(survey, people);
+  const chapters = chaptersInOrder(survey);
+  const topics = chapters.filter(function (ch) { return ch.id !== 'about' && ch.active !== false; });
+  const fixedN = RESULTS_FIXED.length;
+  const width = fixedN + groups.reduce(function (a, g) { return a + g.cols.length; }, 0);
+
+  const row1 = ['עונים · עודכן ' + Utilities.formatDate(new Date(), 'Asia/Jerusalem', 'dd/MM/yyyy HH:mm')];
+  for (let i = 1; i < fixedN; i++) row1.push('');
+  const row2 = RESULTS_FIXED.slice();
+  groups.forEach(function (g) {
+    g.cols.forEach(function (c, i) { row1.push(i ? '' : g.title); row2.push(c.text); });
+  });
+  const rows = [row1.map(textCell), row2.map(textCell)];
+  people.forEach(function (p, n) {
+    const rel = topics.filter(function (ch) { return evalCond(ch.showIf, p.answers); });
+    const done = rel.filter(function (ch) { return p.chapters[ch.id] || p.skipped[ch.id]; }).length;
+    const skipped = chapters.filter(function (ch) { return p.skipped[ch.id] && !p.chapters[ch.id]; }).map(function (ch) { return ch.title; });
+    const row = [n + 1, resultCell(p.answers.about_name), p.rid, p.first, p.last, done + ' מתוך ' + rel.length, textCell(skipped.join(', '))];
+    groups.forEach(function (g) { g.cols.forEach(function (c) { row.push(resultCell(p.answers[c.id], c)); }); });
+    rows.push(row);
+  });
+
+  sheet.clear();
+  ensureCols(sheet, width);
+  sheet.getRange(1, 1, rows.length, width).setValues(rows);
+
+  // עיצוב: שתי שורות כותרת קבועות, השם והמספר תמיד בצד, צבע לכל נושא
+  sheet.setRightToLeft(true);
+  sheet.setFrozenRows(2);
+  sheet.setFrozenColumns(2);
+  const bg1 = [], bg2 = [], fc1 = [];
+  for (let i = 0; i < fixedN; i++) { bg1.push('#1E2A24'); bg2.push('#EDE4D3'); fc1.push('#FFFFFF'); }
+  groups.forEach(function (g, gi) {
+    const c = RESULTS_COLORS[gi % RESULTS_COLORS.length];
+    g.cols.forEach(function () { bg1.push(c[0]); bg2.push(c[1]); fc1.push('#FFFFFF'); });
+  });
+  sheet.getRange(1, 1, 2, width).setFontWeight('bold').setVerticalAlignment('top');
+  sheet.getRange(1, 1, 1, width).setBackgrounds([bg1]).setFontColors([fc1]);
+  sheet.getRange(2, 1, 1, width).setBackgrounds([bg2]).setWrap(true);
+  if (people.length) {
+    sheet.getRange(3, 1, people.length, width).setVerticalAlignment('top').setWrapStrategy(SpreadsheetApp.WrapStrategy.CLIP);
+    sheet.getRange(3, 4, people.length, 2).setNumberFormat('dd/MM/yyyy HH:mm');
+  }
+  RESULTS_WIDTHS.forEach(function (w, i) { sheet.setColumnWidth(i + 1, w); });
+  let col = fixedN + 1;
+  groups.forEach(function (g) {
+    g.cols.forEach(function (c) { sheet.setColumnWidth(col++, c.type === 'scale' || c.type === 'radio' || c.type === 'number' ? 150 : 230); });
+  });
 }
 
 function submitChapter(rid, chapterId, answersJson) {
@@ -603,37 +735,9 @@ function submitChapter(rid, chapterId, answersJson) {
     const answers = parseJsonSafe(answersJson, null);
     if (!answers || typeof answers !== 'object' || Array.isArray(answers)) return { success: false, message: 'תשובות לא תקינות' };
 
+    // רק לטאב הגולמי. טאב "תוצאות" נבנה ממנו בנפרד (buildResultsSheet), כדי שהשמירה תהיה מהירה
     withLock(function () {
-      // 1. שמירה גולמית (append-only, גיבוי מלא)
-      const raw = ensureSheet(T_RAW, RAW_HEADERS);
-      raw.appendRow([new Date(), rid, chapterId, JSON.stringify(answers)]);
-
-      // 2. עדכון הטבלה השטוחה — קריאה אחת וכתיבה אחת לשורה (מהיר יותר תחת עומס)
-      const flat = ensureSheet(T_FLAT, ['קוד עונה', 'עדכון אחרון']);
-      let headers = flat.getRange(1, 1, 1, Math.max(flat.getLastColumn(), 2)).getValues()[0];
-
-      // עמודות חסרות? (שאלה חדשה שנוספה בגיליון)
-      const missing = Object.keys(answers).filter(function (qId) { return qId.charAt(0) !== '_' && headers.indexOf(qId) === -1; });
-      if (missing.length) {
-        ensureCols(flat, headers.length + missing.length);
-        flat.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
-        headers = headers.concat(missing);
-      }
-
-      const row = findRidRow(flat, rid);
-      // ערכים שנקראים בחזרה מאבדים את הגרש שהגן עליהם; safeCell מחזיר אותו לפני הכתיבה מחדש
-      const vals = row === -1
-        ? headers.map(function () { return ''; })
-        : flat.getRange(row, 1, 1, headers.length).getValues()[0].map(safeCell);
-      vals[0] = rid;
-      vals[1] = new Date();
-      for (const qId in answers) {
-        if (qId.charAt(0) === '_') continue; // סימוני מערכת (דילוג וכו') — רק בגולמי
-        const col = headers.indexOf(qId);
-        if (col > 1) vals[col] = flatValue(answers[qId]);
-      }
-      if (row === -1) flat.appendRow(vals);
-      else flat.getRange(row, 1, 1, headers.length).setValues([vals]);
+      ensureSheet(T_RAW, RAW_HEADERS).appendRow([new Date(), rid, chapterId, JSON.stringify(answers)]);
     });
     return { success: true };
   } catch (e) {
@@ -650,18 +754,13 @@ function discardedRids(rawData) {
   return out;
 }
 
-// "התחלה מחדש": התשובות הקודמות נשארות בגיבוי הגולמי אבל לא נספרות, והשורה בטבלה השטוחה נמחקת
+// "התחלה מחדש": התשובות הקודמות נשארות בגיבוי הגולמי אבל לא נספרות (וגם לא בטאב "תוצאות")
 function discard(rid) {
   try {
     rid = normRid(rid);
     if (!rid) return { success: false, message: 'קוד עונה לא תקין' };
     withLock(function () {
       ensureSheet(T_RAW, RAW_HEADERS).appendRow([new Date(), rid, DISCARD_CH, '{}']);
-      const flat = getSpreadsheet().getSheetByName(T_FLAT);
-      if (flat) {
-        const row = findRidRow(flat, rid);
-        if (row > 1) flat.deleteRow(row);
-      }
     });
     return { success: true };
   } catch (e) {
@@ -973,6 +1072,10 @@ function route(e, body) {
 
       case 'getPublicReport':
         return jsonResponse(getPublicReport());
+
+      case 'refreshResults': // הדשבורד, לפני שפותחים את הגיליון
+        if (!checkPassword(p.password)) return jsonResponse({ success: false, message: 'סיסמה שגויה' });
+        return jsonResponse(buildResultsSheet(false));
 
       case 'getAdmin':
         return jsonResponse(getAdmin(p.password));

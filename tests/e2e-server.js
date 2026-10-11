@@ -43,6 +43,7 @@ http.createServer((req, res) => {
     const pw = g.SS.getSheetByName('הגדרות').rows.find(r => r[0] === 'dashboardPassword')[1];
     g.ctx.saveSurvey(pw, JSON.stringify(loadSurvey(ROOT)), '', true);
     fillDemo(g, ROOT, n);
+    g.ctx.buildResultsSheet(true);
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ ok: true, n }));
     return;
@@ -50,6 +51,7 @@ http.createServer((req, res) => {
 
   // מבט פנימי על הגיליון המדומה, לבדיקה
   if (url.pathname === '/__sheet') {
+    g.ctx.keepWarm(); // כמו הטריגר של כל 10 דקות: טאב "תוצאות" מתעדכן
     const name = url.searchParams.get('name');
     const sh = name ? g.SS.getSheetByName(name) : null;
     res.writeHead(200, { ...cors, 'Content-Type': 'application/json; charset=utf-8' });
