@@ -84,6 +84,9 @@ const Q = { items: [], busy: false, timer: null, fails: 0, warned: false };
 // תשובה שלא תשתנה בניסיון חוזר (למשל הסקר נסגר): לא מנסים שוב
 const FINAL_ERROR = /סגור|לא תקין|בדקו את/;
 const draftKey = (ch) => 'np_draft_' + ch;
+// השוואה מול השרת (ראו reconcile): פעם אחת בכל מכשיר לכל תג
+const SYNC_KEY = 'np_synced';
+const SYNC_TAG = '2026-10-11';
 
 init();
 
@@ -104,6 +107,7 @@ async function init() {
 
   if (!S.serverMode) return;
   flush(); // מה שלא הספיק להישלח בביקור הקודם
+  if (localStorage.getItem(SYNC_KEY) !== SYNC_TAG) setTimeout(reconcile, 2500);
   window.addEventListener('online', flush);
   window.addEventListener('pagehide', beaconOutbox);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') flush(); else beaconOutbox(); });
@@ -976,6 +980,27 @@ async function drain(ms) {
   return !Q.items.length;
 }
 
+// נושא שנשמר במכשיר ולא נמצא בשרת (למשל אחרי תקלה בשרת) נשלח שוב מהטיוטה, ומייל שלא נקשר לקוד העונה
+// מזוהה שוב. רץ פעם אחת בכל מכשיר, ותמיד לפני הרשמה להגרלה (שבה השרת בודק שכל הנושאים הגיעו)
+async function reconcile() {
+  if (!S.serverMode || !Object.keys(S.done).length) return;
+  if (!(await drain(20000))) return; // קודם מה שכבר בדרך
+  let res = null;
+  try { res = await apiPost('savedTopics', { rid: getRid() }); } catch (e) { return; }
+  if (!res || !res.success) return;
+  if (!res.discarded) {
+    const have = new Set(res.chapters || []);
+    const email = localStorage.getItem(EMAIL_KEY);
+    if (!res.email && email) enqueue({ type: 'identify', email });
+    Object.keys(S.done).forEach(chId => {
+      if (have.has(chId) || chId in S.remote) return; // נשמר ממכשיר אחר: התשובות בשרת, לא כאן
+      const d = getDraft(chId);
+      if (Object.keys(d).length) enqueue({ type: 'submit', chapter: chId, answers: d });
+    });
+  }
+  localStorage.setItem(SYNC_KEY, SYNC_TAG);
+}
+
 // סוגרים את הדף באמצע שמירה: שולחים את התור גם בדרך שלא מחכה לתשובה. התור נשאר ויישלח שוב בכניסה הבאה
 // (שליחה כפולה לא מזיקה). פעולות שאחרי זיהוי מייל שעוד לא חזר נשארות לכניסה הבאה, כדי שלא יישמרו לקוד הלא נכון.
 function beaconOutbox() {
@@ -1123,7 +1148,8 @@ function showRaffleModal() {
           actions.hidden = true;
           status.replaceChildren(loadingSteps(RAFFLE_STEPS, { inline: true, slow: 'עוד רגע, כמעט שם…' }));
           try {
-            // השרת בודק שכל הנושאים נענו, אז קודם כל מה שבתור צריך להגיע אליו
+            // השרת בודק שכל הנושאים נענו, אז קודם כל מה שבתור צריך להגיע אליו (כולל מה שחסר בשרת)
+            await reconcile();
             if (!(await drain(45000))) throw new ServerSaid('חלק מהתשובות עוד לא הגיעו לשרת. בדקו את החיבור ונסו שוב');
             // POST: שם וטלפון לא נכנסים לכתובת (שנשמרת בלוגים)
             const res = await apiPost('enterRaffle', { rid: getRid(), name, phone });

@@ -269,14 +269,25 @@ const DONT_KNOW = 'לא יודע/ת';
 // הטאבים "פרקים" ו"שאלות" הם רק אחסון (וגיבוי קריא). לא עורכים אותם ידנית.
 // ============================================================
 
-function checkPassword(password) {
-  return !!password && String(password) === getSettings().dashboardPassword;
+// ניחוש סיסמה: אחרי 30 ניסיונות שגויים, הבדיקה ננעלת עד 10 דקות אחרי האחרון. הנעילה לכולם,
+// כי Apps Script לא יודע מאיזו כתובת הגיעה הבקשה. מחזיר '' כשהסיסמה נכונה, אחרת את ההודעה למשתמש
+const PW_MAX_FAILS = 30;
+const PW_LOCK_SECS = 600;
+
+function passwordError(password) {
+  const cache = CacheService.getScriptCache();
+  const fails = Number(cache.get('pw_fails') || 0);
+  if (fails >= PW_MAX_FAILS) return 'יותר מדי ניסיונות עם סיסמה שגויה. נסו שוב בעוד 10 דקות';
+  if (password && String(password) === getSettings().dashboardPassword) return '';
+  cache.put('pw_fails', String(fails + 1), PW_LOCK_SECS);
+  return 'סיסמה שגויה';
 }
 
 // השאלון המלא, כולל נושאים ושאלות מוסתרים. legacy = עוד לא נשמר מדף הניהול
 function getAdmin(password) {
   try {
-    if (!checkPassword(password)) return { success: false, message: 'סיסמה שגויה' };
+    const pwErr = passwordError(password);
+    if (pwErr) return { success: false, message: pwErr };
     const settings = getSettings();
     return {
       success: true,
@@ -303,7 +314,8 @@ function answeredCounts() {
 // rev: הגרסה שהדף טען. אם מישהו אחר שמר בינתיים, לא דורסים (אלא אם force)
 function saveSurvey(password, surveyJson, rev, force) {
   try {
-    if (!checkPassword(password)) return { success: false, message: 'סיסמה שגויה' };
+    const pwErr = passwordError(password);
+    if (pwErr) return { success: false, message: pwErr };
     const survey = parseJsonSafe(surveyJson, null);
     const errors = validateSurvey(survey);
     if (errors.length) return { success: false, message: 'יש בשאלון דברים לתקן', errors: errors.slice(0, 30) };
@@ -325,7 +337,8 @@ function saveSurvey(password, surveyJson, rev, force) {
 
 function saveSettings(password, surveyOpen, publicReport, newPassword) {
   try {
-    if (!checkPassword(password)) return { success: false, message: 'סיסמה שגויה' };
+    const pwErr = passwordError(password);
+    if (pwErr) return { success: false, message: pwErr };
     newPassword = newPassword === undefined || newPassword === null ? '' : String(newPassword).trim();
     if (newPassword && newPassword.length < 8) return { success: false, message: 'סיסמה חדשה: לפחות 8 תווים' };
     return withLock(function () {
@@ -791,6 +804,26 @@ function resume(rid) {
   }
 }
 
+// מה שמור בשרת לקוד עונה: אילו נושאים (בלי התשובות עצמן), והאם יש מייל שמצביע עליו.
+// המכשיר משווה למה שאצלו ושולח שוב מה שחסר, למשל אחרי תקלה בשרת (11/10/2026: ניקוי שמחק כמה דקות של תשובות)
+function savedTopics(rid) {
+  try {
+    rid = normRid(rid);
+    if (!rid) return { success: false, message: 'קוד עונה לא תקין' };
+    const ss = getSpreadsheet();
+    const raw = ss.getSheetByName(T_RAW);
+    const data = raw && raw.getLastRow() > 1 ? raw.getDataRange().getValues() : [[]];
+    if (discardedRids(data)[rid]) return { success: true, discarded: true, chapters: [], email: true };
+    const chapters = {};
+    for (let i = 1; i < data.length; i++) if (String(data[i][1]) === rid) chapters[String(data[i][2])] = true;
+    const em = ss.getSheetByName(T_EMAILS);
+    const rids = em && em.getLastRow() > 1 ? em.getRange(2, 3, em.getLastRow() - 1, 1).getValues() : [];
+    return { success: true, chapters: Object.keys(chapters), email: rids.some(function (r) { return String(r[0]) === rid; }) };
+  } catch (e) {
+    return { success: false, message: e.toString() };
+  }
+}
+
 // ============================================================
 // מייל = זהות: כתובת אחת, סקר אחד, והמשך מכל מכשיר. לא שולחים מיילים.
 // כתובת חדשה נקשרת לקוד העונה של המכשיר. כתובת מוכרת ממכשיר אחר מחזירה את קוד העונה שלה
@@ -924,8 +957,9 @@ function enterRaffle(rid, name, phone) {
 
 function getResults(password) {
   try {
+    const pwErr = passwordError(password);
+    if (pwErr) return { success: false, message: pwErr };
     const settings = getSettings();
-    if (!password || password !== settings.dashboardPassword) return { success: false, message: 'סיסמה שגויה' };
     const raw = getSpreadsheet().getSheetByName(T_RAW);
     const rows = [];
     if (raw && raw.getLastRow() > 1) {
@@ -1064,6 +1098,9 @@ function route(e, body) {
       case 'identify':
         return jsonResponse(identify(p.email, p.rid));
 
+      case 'savedTopics':
+        return jsonResponse(savedTopics(p.rid));
+
       case 'enterRaffle':
         return jsonResponse(enterRaffle(p.rid, p.name, p.phone));
 
@@ -1074,7 +1111,8 @@ function route(e, body) {
         return jsonResponse(getPublicReport());
 
       case 'refreshResults': // הדשבורד, לפני שפותחים את הגיליון
-        if (!checkPassword(p.password)) return jsonResponse({ success: false, message: 'סיסמה שגויה' });
+        const pwErr = passwordError(p.password);
+        if (pwErr) return jsonResponse({ success: false, message: pwErr });
         return jsonResponse(buildResultsSheet(false));
 
       case 'getAdmin':

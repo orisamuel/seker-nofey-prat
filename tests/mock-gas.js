@@ -76,6 +76,7 @@ class Range {
     return this;
   }
   setValue(v) { return this.setValues([[v]]); }
+  clearContent() { return this.setValues(Array.from({ length: this.nr }, () => Array(this.nc).fill(''))); }
   // עיצוב: נשמר רק כדי שהבדיקות יוכלו לוודא שהוא נקרא
   fmt(k, v) { (this.sheet.formats = this.sheet.formats || {})[k + '@' + [this.r, this.c, this.nr, this.nc]] = v; return this; }
   setFontWeight(v) { return this.fmt('fontWeight', v); }

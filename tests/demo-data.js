@@ -50,7 +50,7 @@ function fillDemo(g, root, n) {
     const p = {
       about_age: pick(opt('about_age'), [8, 30, 32, 20, 10]),
       about_seniority: pick(opt('about_seniority'), [25, 30, 20, 15, 10]),
-      about_housing: pick(opt('about_housing'), [55, 20, 15, 10]),
+      about_housing: pick(opt('about_housing'), [50, 20, 12, 8, 10]),
       about_submitted: 'כן',
     };
     const kids = opt('about_kids');

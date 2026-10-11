@@ -360,5 +360,26 @@ check('settings: numeric password kept as text', r.success && pw() === '00123456
 check('notice tab instead of the editing guide', !!SS.getSheetByName('קרא אותי') && !SS.getSheetByName('מדריך עריכה') && SS.getSheetByName('קרא אותי').rows[1][0].includes('admin.html'));
 check('tabs protected with a warning, once', ['פרקים', 'שאלות', 'הגדרות', 'תוצאות'].every(n => SS.getSheetByName(n).protections.length === 1 && SS.getSheetByName(n).protections[0].warningOnly === true));
 
+// ── 13ב. מה שמור לקוד עונה (המכשיר משלים מה שחסר) ──
+r = post({ action: 'savedTopics', rid: 'bad' });
+check('savedTopics: bad rid', !r.success);
+r = post({ action: 'savedTopics', rid: A });
+check('savedTopics: topics of A, with its email, no answers', r.success && r.chapters.includes('about') && r.chapters.includes('community') && r.chapters.includes('budget') && r.email === true && !/comm_belong|HYPERLINK/.test(JSON.stringify(r)), r);
+r = post({ action: 'savedTopics', rid: 'NOMAIL22' });
+check('savedTopics: unknown rid, nothing saved, no email', r.success && r.chapters.length === 0 && r.email === false, r);
+r = post({ action: 'savedTopics', rid: B });
+check('savedTopics: discarded survey is not refilled', r.success && r.discarded === true && r.chapters.length === 0, r);
+
+// ── 14. ניחוש סיסמה: נעילה אחרי 30 ניסיונות שגויים ──
+delete cache.pw_fails;
+for (let i = 0; i < 29; i++) post({ action: 'getResults', password: 'guess' + i });
+check('29 wrong tries: the right password still works', post({ action: 'getResults', password: pw() }).success);
+post({ action: 'getAdmin', password: 'guess-last' });
+r = post({ action: 'getResults', password: pw() });
+check('locked after 30 wrong tries, even with the right password', !r.success && /יותר מדי/.test(r.message) && !r.rows, r.message);
+check('lock covers the admin page too', /יותר מדי/.test(post({ action: 'getAdmin', password: pw() }).message));
+delete cache.pw_fails; // עשר דקות עברו
+check('unlocked after the window', post({ action: 'getResults', password: pw() }).success);
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

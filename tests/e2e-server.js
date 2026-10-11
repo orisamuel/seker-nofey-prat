@@ -49,6 +49,13 @@ http.createServer((req, res) => {
     return;
   }
 
+  // תקלה מדומה בשרת: /__wipe מוחק את התשובות והמיילים (כמו הניקוי של 11/10/2026), כדי לבדוק שהמכשיר משלים
+  if (url.pathname === '/__wipe') {
+    ['תשובות גולמי', 'מיילים'].forEach(n => { const sh = g.SS.getSheetByName(n); sh.rows = sh.rows.slice(0, 1); });
+    res.writeHead(200, cors); res.end('wiped');
+    return;
+  }
+
   // מבט פנימי על הגיליון המדומה, לבדיקה
   if (url.pathname === '/__sheet') {
     g.ctx.keepWarm(); // כמו הטריגר של כל 10 דקות: טאב "תוצאות" מתעדכן
