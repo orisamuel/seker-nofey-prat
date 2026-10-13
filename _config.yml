@@ -1,0 +1,16 @@
+# GitHub Pages בונה את האתר מהתיקייה הזו עם Jekyll (ענף main, נתיב /).
+# מה שברשימה נשאר בריפו, אבל לא מוגש ב-sekernofey.online.
+# האתר עצמו: index.html, admin.html, dashboard.html, report.html, styles.css,
+# config.js, utils.js, icons.js, survey-data.js ו-og.png. לא להחריג אותם.
+# קבצים ותיקיות שמתחילים ב-. או ב-_ (כמו .claude) לא מוגשים ממילא.
+# שם ברשימה תופס גם כל נתיב שמתחיל בו: "config" היה מסתיר את config.js.
+exclude:
+  - "*.md"           # CLAUDE.md, DECISIONS.md, README.md, improvements.md, survey-2025-source.md
+  - "*.gs"           # appscript.gs, קוד השרת
+  - "*.sh"           # deploy.sh
+  - "*.xlsx"         # קובץ השאלות מהוועדות (לא בגיט, ליתר ביטחון)
+  - appsscript.json  # ההגדרות של Apps Script
+  - tests            # בדיקות, שרת מדומה ועונים מדומים
+  # רשימה משלנו מחליפה את ברירת המחדל של GitHub Pages, שמסתירה את CNAME.
+  # הקובץ נשאר בריפו בשביל הדומיין, ופשוט לא מוגש, כמו קודם.
+  - CNAME
