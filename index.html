@@ -9,7 +9,7 @@
   <meta property="og:type" content="website">
   <meta property="og:locale" content="he_IL">
   <meta property="og:title" content="מה דעתך, נופי פרת? סקר התושבים תשפ״ז">
-  <meta property="og:description" content="הסקר נסגר לתשובות. תודה רבה לכל מי שהשתתף!">
+  <meta property="og:description" content="הסקר נסגר לתשובות. תודה רבה לכל מי שהשתתף! התוצאות כבר באתר.">
   <!-- תמונת השיתוף בוואטסאפ -->
   <meta property="og:url" content="https://sekernofey.online/">
   <meta property="og:image" content="https://sekernofey.online/og.png">
@@ -156,7 +156,10 @@ function goClosed() {
   closeDrawer();
   document.body.classList.add('closed');
   const view = el('div', { class: 'land' },
-    poster(S.survey.meta, ['הסקר נסגר', 'לתשובות'], 'תודה רבה לכל מי שהשתתף!', false)
+    poster(S.survey.meta, ['הסקר נסגר', 'לתשובות'], 'תודה רבה לכל מי שהשתתף!', false),
+    // מצגת התוצאות לתושבים (פורסמה ב-18/10/2026)
+    el('div', { class: 'land-cta' },
+      el('a', { class: 'btn btn-primary btn-block', href: 'results.html' }, 'לתוצאות הסקר', icon('arrow-left')))
   );
   setView(view, null, 'closed');
 }

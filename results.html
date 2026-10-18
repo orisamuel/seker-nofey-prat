@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>מה אמרתם, נופי פרת? · תוצאות סקר התושבים</title>
+  <meta name="description" content="תוצאות סקר התושבים של נופי פרת, תשפ״ז: הנתונים והציטוטים, בכמה שקפים.">
+  <meta name="robots" content="noindex">
+  <meta name="theme-color" content="#F6F1E7">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="he_IL">
+  <meta property="og:title" content="מה אמרתם, נופי פרת? תוצאות סקר התושבים">
+  <meta property="og:description" content="244 תושבים ענו. הנתונים והציטוטים, בכמה שקפים.">
+  <meta property="og:url" content="https://sekernofey.online/results.html">
+  <meta property="og:image" content="https://sekernofey.online/og-results.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 28 28'%3E%3CclipPath id='c'%3E%3Ccircle cx='14' cy='14' r='14'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='28' height='28' fill='%230E6B5B'/%3E%3Ccircle cx='18.5' cy='9.5' r='4' fill='%23E2A73E'/%3E%3Cpath d='M0 19c5-4 9-3.5 14-1.5s9 1 14-1V28H0z' fill='%23E8D9BC'/%3E%3Cpath d='M0 23c6-3 12-2 17-.5S24 23 28 22v6H0z' fill='%23BF5533'/%3E%3C/g%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Karantina:wght@700&family=Rubik:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="utils.js"></script>
+  <script src="icons.js"></script>
+  <script src="results-data.js"></script>
+  <style>
+    /* מצגת התוצאות: שקף לכל מסר, מחליקים לצדדים (גלילה אופקית עם הצמדה), ופס ניווט קבוע למטה.
+       הגרפים: טורקיז אחד לכל העמודות (#0C8A70, עבר את בדיקת הצבעים מול הטרקוטה), עמודות דקות
+       עם קצה מעוגל, והמספר תמיד כתוב ליד, כך שהצבע אף פעם לא נושא מידע לבד */
+    :root { --nav-h: 66px; --bar: #0C8A70; --neutral: #9C9283; --low: #BF5533; }
+    html, body { height: 100%; }
+    body { overflow: hidden; background: var(--paper); }
+    .deck {
+      position: fixed; inset: 0 0 calc(var(--nav-h) + env(safe-area-inset-bottom)) 0;
+      display: flex; overflow-x: auto; overflow-y: hidden;
+      scroll-snap-type: x mandatory; overscroll-behavior-x: contain; scrollbar-width: none;
+    }
+    .deck::-webkit-scrollbar { display: none; }
+    .slide { flex: 0 0 100%; height: 100%; overflow-y: auto; scroll-snap-align: start; scroll-snap-stop: always; }
+    .slide-in { max-width: 560px; margin: 0 auto; padding: 16px 18px 24px; }
+
+    .r-kicker { display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px 5px 14px; border-radius: 99px;
+      background: var(--hue-soft, var(--teal-soft)); color: var(--hue-deep, var(--teal-deep)); font-size: 14px; font-weight: 600; }
+    .r-kicker svg.ic { font-size: 16px; }
+    .r-s-title { font-family: var(--font-display); font-size: 42px; line-height: .95; margin: 10px 0 4px; color: var(--ink); }
+    .r-s-lead { font-size: 15px; line-height: 1.45; color: var(--ink-soft); margin-bottom: 12px; }
+    .r-block-h { font-size: 15px; font-weight: 700; margin: 16px 0 8px; }
+    .r-block-h small { font-weight: 400; color: var(--muted); font-size: 13px; }
+    .r-note { font-size: 12.5px; color: var(--muted); line-height: 1.45; margin-top: 12px; }
+
+    /* מספרים גדולים */
+    .r-figs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .r-figs.two { grid-template-columns: repeat(2, 1fr); }
+    .r-fig { background: var(--surface); border-radius: var(--r-md); padding: 12px 12px 11px; box-shadow: inset 0 0 0 1px var(--line); }
+    .r-fig b { display: block; font-size: 32px; font-weight: 700; line-height: 1.05; color: var(--ink); letter-spacing: -.5px; }
+    .r-fig span { display: block; font-size: 13.5px; line-height: 1.3; color: var(--ink-soft); margin-top: 4px; }
+    .r-fig small { display: block; font-size: 12px; color: var(--muted); margin-top: 3px; }
+    .r-hero { display: flex; align-items: baseline; gap: 10px; margin: 2px 0 12px; }
+    .r-hero b { font-size: 56px; font-weight: 700; line-height: 1; color: var(--teal); letter-spacing: -1px; }
+    .r-hero span { font-size: 17px; font-weight: 500; color: var(--ink-soft); }
+
+    /* עמודות אופקיות: שם ומספר מעל, העמודה מתחת. הבסיס בצד ימין, הקצה המעוגל בצד שמאל */
+    .r-bars { display: grid; gap: 9px; }
+    .r-bar-head { display: flex; align-items: baseline; gap: 8px; font-size: 14.5px; margin-bottom: 3px; }
+    .r-bar-head .lbl { flex: 1; min-width: 0; color: var(--ink); }
+    .r-bar-head .lbl small { color: var(--muted); font-size: 12px; margin-inline-start: 4px; }
+    .r-bar-head .val { font-weight: 700; color: var(--ink); white-space: nowrap; }
+    .r-track { height: 12px; background: rgba(207, 195, 174, .32); border-radius: 0 4px 4px 0; overflow: hidden; }
+    .r-track i { display: block; height: 100%; background: var(--bar); border-radius: 4px 0 0 4px; }
+
+    /* עמודה אחת מחולקת (שייכות, הצופים, התקציב): 2 פיקסלים של רקע בין החלקים, ומקרא עם המספרים */
+    .r-stack { display: flex; gap: 2px; height: 22px; }
+    .r-stack i { display: block; height: 100%; }
+    .r-stack i:first-child { border-radius: 0 4px 4px 0; }
+    .r-stack i:last-child { border-radius: 4px 0 0 4px; }
+    .r-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; font-size: 13.5px; color: var(--ink-soft); }
+    .r-legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .r-legend span::before { content: ''; width: 10px; height: 10px; border-radius: 3px; background: var(--c); }
+    .r-legend b { color: var(--ink); }
+
+    /* כרטיסי שירותים */
+    .r-svc { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .r-svc .r-fig b { font-size: 30px; }
+    .r-svc .r-fig b small { display: inline; font-size: 14px; color: var(--muted); font-weight: 500; margin: 0 3px 0 0; }
+    .r-svc h3 { font-size: 15px; font-weight: 700; margin-bottom: 2px; }
+    .r-svc p { font-size: 13px; line-height: 1.35; color: var(--ink-soft); margin-top: 6px; }
+
+    .r-themes { display: grid; gap: 7px; font-size: 14.5px; line-height: 1.4; }
+    .r-themes li { list-style: none; display: flex; gap: 8px; }
+    .r-themes li::before { content: ''; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--hue, var(--teal)); margin-top: 7px; }
+
+    .r-quote { position: relative; margin-top: 14px; padding: 14px 16px 12px 16px; background: var(--hue-soft, var(--teal-soft)); border-radius: var(--r-md); }
+    .r-quote p { font-size: 16px; font-weight: 500; line-height: 1.45; color: var(--ink); }
+    .r-quote p::before { content: '״'; display: block; font-family: var(--font-display); font-size: 54px; line-height: .55; height: 22px; color: var(--hue, var(--teal)); }
+    .r-quote cite { display: block; font-style: normal; font-size: 12.5px; color: var(--ink-soft); margin-top: 6px; }
+
+    /* פתיחה וסיום: הפוסטר של הסקר */
+    .slide .poster { height: min(62vh, 480px); }
+    .slide .poster h1 { font-size: 84px; }
+    .r-cover-sub { font-size: 16px; color: var(--ink-soft); text-align: center; margin-top: 16px; line-height: 1.5; }
+    .r-cover-sub b { color: var(--ink); }
+
+    .deck-nav {
+      position: fixed; inset: auto 0 0 0; z-index: 5;
+      height: calc(var(--nav-h) + env(safe-area-inset-bottom)); padding: 0 14px env(safe-area-inset-bottom);
+      background: rgba(246, 241, 231, .96); border-top: 1px solid var(--line);
+    }
+    .deck-nav-in { max-width: 560px; height: var(--nav-h); margin: 0 auto; display: flex; align-items: center; gap: 10px; }
+    .deck-nav .btn { min-height: 46px; }
+    .deck-nav .btn-primary { padding: 0 18px; }
+    .deck-nav .spacer { flex: 1; }
+    .r-dots { display: flex; gap: 6px; align-items: center; }
+    .r-dots button { width: 8px; height: 8px; padding: 0; border: none; border-radius: 99px; background: var(--line-strong); transition: width .2s, background .2s; }
+    .r-dots button.on { width: 22px; background: var(--teal); }
+    .r-count { font-size: 13px; color: var(--muted); min-width: 34px; text-align: center; font-variant-numeric: tabular-nums; }
+    @media (max-width: 479px) { .r-count { display: none; } }
+    @media (max-width: 360px) { .r-dots { display: none; } .r-count { display: block; } .r-s-title { font-size: 38px; } .r-fig b { font-size: 27px; } }
+    @media (min-width: 560px) { .r-s-title { font-size: 54px; } .slide-in { padding-top: 34px; } }
+    @media (prefers-reduced-motion: reduce) { .r-dots button { transition: none; } }
+  </style>
+</head>
+<body>
+
+<main class="deck" id="deck" aria-roledescription="מצגת"></main>
+
+<nav class="deck-nav" aria-label="ניווט בין השקפים">
+  <div class="deck-nav-in">
+    <button class="btn btn-ghost btn-round" id="prev" aria-label="השקף הקודם"></button>
+    <span class="spacer"></span>
+    <div class="r-dots" id="dots"></div>
+    <span class="r-count" id="count" aria-live="polite"></span>
+    <span class="spacer"></span>
+    <button class="btn btn-primary" id="next"></button>
+  </div>
+</nav>
+
+<script>
+/* ============================================================
+   מצגת התוצאות לתושבים. הנתונים ב-results-data.js (מצרפי בלבד, נבנה מהגיליון אחרי שהסקר נסגר).
+   שקף לכל מסר, לפי המצגת של הוועד ("מצגת ניתוח 181026"), בלי ההמלצות: לתושבים נתונים וציטוטים.
+   קישור לשקף מסוים: results.html#4
+   ============================================================ */
+
+const R = window.RESULTS;
+const pct = (n, of) => (of ? Math.round((n / of) * 100) : 0);
+const P = ([n, of]) => pct(n, of) + '%';
+const from = ([n, of]) => n + ' מתוך ' + of;
+// טווח מספרים ("26–35") נשאר משמאל לימין, גם בתוך שורה בעברית. אחרת הוא מוצג הפוך ("35–26")
+const ltrRange = (t) => (/^\d+\s*[–-]\s*\d+$/.test(t) ? el('span', { dir: 'ltr' }, t) : t);
+
+// ── רכיבים ───────────────────────────────────────────────
+
+function slide(hue, label, ...kids) {
+  return el('section', { class: 'slide' + (hue ? ' hue-' + hue : ''), 'aria-label': label, 'aria-roledescription': 'שקף' }, el('div', { class: 'slide-in' }, ...kids));
+}
+
+function head(iconName, kicker, title, lead) {
+  return [el('p', { class: 'r-kicker' }, icon(iconName), kicker), el('h2', { class: 'r-s-title' }, title), lead ? el('p', { class: 'r-s-lead' }, lead) : null];
+}
+
+function fig(value, label, sub) {
+  return el('div', { class: 'r-fig' }, el('b', {}, value), el('span', {}, label), sub ? el('small', {}, sub) : null);
+}
+
+// עמודות: [שם, מספר] מתוך בסיס. מוצג האחוז, והמספר עצמו ברחיפה
+function bars(rows, of) {
+  return el('div', { class: 'r-bars' }, ...rows.map(([label, n]) => el('div', { class: 'r-bar' },
+    el('div', { class: 'r-bar-head' }, el('span', { class: 'lbl' }, ltrRange(label)), el('span', { class: 'val' }, pct(n, of) + '%')),
+    el('div', { class: 'r-track', title: n + ' מתוך ' + of }, el('i', { style: 'width:' + pct(n, of) + '%' })))));
+}
+
+// ציונים בסולם 1 עד 10: אורך העמודה לפי הממוצע, וכמה נתנו ציון
+function scoreBars(list) {
+  return el('div', { class: 'r-bars' }, ...list.map(s => el('div', { class: 'r-bar' },
+    el('div', { class: 'r-bar-head' }, el('span', { class: 'lbl' }, s.label, el('small', {}, s.n + ' ענו')), el('span', { class: 'val' }, s.avg.toFixed(1))),
+    el('div', { class: 'r-track', title: 'ממוצע ' + s.avg.toFixed(1) + ' מתוך 10' }, el('i', { style: 'width:' + s.avg * 10 + '%' })))));
+}
+
+// עמודה אחת מחולקת: [שם, מספר, צבע], עם מקרא שבו כתוב כל אחוז
+function stack(parts, of) {
+  return el('div', {},
+    el('div', { class: 'r-stack', role: 'img', 'aria-label': parts.map(([l, n]) => l + ' ' + pct(n, of) + '%').join(', ') },
+      ...parts.map(([l, n, c]) => el('i', { style: 'flex:' + n + ' 0 0; background:' + c, title: l + ': ' + n + ' מתוך ' + of }))),
+    el('div', { class: 'r-legend' }, ...parts.map(([l, n, c]) => el('span', { style: '--c:' + c }, l + ' ', el('b', {}, pct(n, of) + '%')))));
+}
+
+function quote(text) {
+  return el('blockquote', { class: 'r-quote' }, el('p', {}, text), el('cite', {}, 'מתוך תשובה בסקר'));
+}
+
+// הפוסטר של הסקר: לילה, שמש וגבעות הוואדי (כמו במסך הפתיחה של הסקר)
+function poster(kicker, line, accent, sub, sticker) {
+  const art = el('div', { class: 'poster-art', 'aria-hidden': 'true' });
+  art.innerHTML = `
+    <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg" style="position:absolute;inset:0">
+      <defs><radialGradient id="pGlow" cx="85%" cy="0%" r="75%"><stop offset="0" stop-color="#F0BE5A" stop-opacity=".22"/><stop offset="1" stop-color="#F0BE5A" stop-opacity="0"/></radialGradient></defs>
+      <rect width="100%" height="100%" fill="url(#pGlow)"/>
+    </svg>
+    <span style="position:absolute;top:0;right:30px;width:118px;height:59px;border-radius:0 0 118px 118px;background:#E2A73E"></span>
+    <svg viewBox="0 0 343 140" preserveAspectRatio="none" style="position:absolute;left:0;right:0;bottom:0;width:100%;height:140px">
+      <path d="M0 46 C55 14 115 20 170 44 S280 66 343 50 V140 H0Z" fill="#E8D9BC"/>
+      <path d="M0 78 C70 54 132 64 192 80 S292 74 343 88 V140 H0Z" fill="#6B7A2E"/>
+      <path d="M20 140 C70 118 128 106 196 102 S300 98 343 104" fill="none" stroke="#8FD0C2" stroke-width="3.5" stroke-linecap="round" vector-effect="non-scaling-stroke"/>
+      <path d="M0 140 V100 C38 88 86 94 124 112 C140 120 150 132 156 140Z" fill="#BF5533"/>
+      <path d="M0 140 V124 C90 112 200 122 343 114 V140Z" fill="#0A4F44"/>
+    </svg>`;
+  const p = el('div', { class: 'poster' }, art,
+    el('div', { class: 'poster-copy' },
+      el('p', { class: 'poster-kicker' }, kicker),
+      el('h1', {}, line, el('em', {}, accent)),
+      el('p', { class: 'poster-sub' }, sub)));
+  if (sticker) p.append(el('span', { class: 'sticker sticker-time', 'aria-hidden': 'true' }, el('b', {}, sticker[0]), sticker[1]));
+  return p;
+}
+
+// ── השקפים ───────────────────────────────────────────────
+
+function buildSlides() {
+  const w = R.who, c = R.community, y = R.youth, s = R.services, k = R.culture, b = R.budget;
+  const youthPart = Object.fromEntries(y.part.opts), scouts = y.scouts.opts;
+  const svc = (x, title, asked) => el('div', { class: 'r-fig' }, el('h3', {}, title),
+    el('b', {}, x.avg.toFixed(1), el('small', {}, 'מתוך 10')), el('small', {}, pct(x.top, x.n) + '% נתנו 8 עד 10'), el('p', {}, asked));
+
+  return [
+    slide(null, 'פתיחה',
+      poster('תוצאות סקר התושבים · תשפ״ז', 'מה אמרתם,', 'נופי פרת?', R.total + ' תושבים ענו. ככה זה נראה.', [String(R.total), 'ענו']),
+      el('p', { class: 'r-cover-sub' }, 'הנתונים והציטוטים, בכמה שקפים קצרים.', el('br'), el('b', {}, 'מחליקים הצידה, או לוחצים "לתוצאות".'))),
+
+    slide('green', 'מי ענה',
+      ...head('users-round', 'מי ענה', 'מי ענה?', 'בעיקר משפחות ותיקות, בגילי הורות פעילה'),
+      el('div', { class: 'r-hero' }, el('b', {}, String(R.total)), el('span', {}, 'תושבים ענו')),
+      el('div', { class: 'r-figs' },
+        fig(P(w.over6), 'ביישוב 6 שנים ומעלה', from(w.over6)),
+        fig(P(w.aguda), 'חברי אגודה', from(w.aguda)),
+        fig(P(w.women), 'נשים', from(w.women))),
+      el('p', { class: 'r-block-h' }, 'גיל ', el('small', {}, w.age.of + ' ענו')),
+      bars(w.age.opts, w.age.of),
+      el('p', { class: 'r-note' }, 'בכל השקפים: האחוזים מתוך מי שענה על אותה שאלה. לא כולם ענו על כל נושא.')),
+
+    slide('green', 'מה עובד ומה פחות',
+      ...head('sparkles', 'תמונת מצב', 'מה עובד, ומה פחות', 'ממוצע הציונים בסולם 1 עד 10'),
+      scoreBars(R.scores),
+      el('p', { class: 'r-note' }, 'הפאב ופינת החי בראש. הגינון והניקיון בתחתית: המרחב הציבורי מקבל את הציונים הנמוכים.')),
+
+    slide('plum', 'קהילה',
+      ...head('heart-handshake', 'קהילה', 'אירועים, נוער וחינוך בראש', 'על מה כדאי להוציא את תקציב הקהילה? אפשר היה לבחור עד שלושה · ' + c.budget3.of + ' ענו'),
+      bars(c.budget3.opts, c.budget3.of),
+      el('p', { class: 'r-block-h' }, 'תחושת השייכות לקהילה ', el('small', {}, 'סולם 1 עד 7 · ' + c.belong.of + ' ענו')),
+      stack([['גבוהה (6 עד 7)', c.belong.high, 'var(--bar)'], ['בינונית (5)', c.belong.mid, 'var(--neutral)'], ['נמוכה (1 עד 4)', c.belong.low, 'var(--low)']], c.belong.of),
+      quote(R.quotes.community)),
+
+    slide('gold', 'נוער',
+      ...head('guitar', 'נוער', 'רובם משתתפים', 'האם ילדיך משתתפים בפעילות הנוער ביישוב? · ' + y.part.of + ' ענו'),
+      el('div', { class: 'r-figs' },
+        fig(pct(youthPart['כן'], y.part.of) + '%', 'כן'),
+        fig(pct(youthPart['לפעמים'], y.part.of) + '%', 'לפעמים'),
+        fig(pct(youthPart['לא'], y.part.of) + '%', 'לא')),
+      el('p', { class: 'r-block-h' }, 'להמשיך להעביר כרבע מתקציב הנוער לצופים? ', el('small', {}, y.scouts.of + ' ענו')),
+      stack([[scouts[0][0], scouts[0][1], 'var(--bar)'], [scouts[1][0], scouts[1][1], 'var(--neutral)']], y.scouts.of),
+      el('p', { class: 'r-block-h' }, 'איך לחזק את ניהול הנוער? ', el('small', {}, 'אפשר היה לבחור כמה · ' + y.ways.of + ' ענו')),
+      bars(y.ways.opts, y.ways.of),
+      quote(R.quotes.youth)),
+
+    slide('terra', 'שירותים, ביטחון ומרחב ציבורי',
+      ...head('shield-check', 'שירותים', 'ביטחון, שירות ומרחב ציבורי', 'ממוצע בסולם 1 עד 10, ומה עלה בתשובות הפתוחות'),
+      el('div', { class: 'r-svc' },
+        svc(s.security, 'ביטחון', 'סיורים, שער 468 וכביש הגישה'),
+        svc(s.service, 'שירות לתושב', 'זמינות, שעות קבלת קהל ומענה מהיר'),
+        svc(s.post, 'דואר', 'שעות ערב ובוקר, וגם שישי'),
+        el('div', { class: 'r-fig' }, el('h3', {}, 'גינון וניקיון'),
+          el('b', {}, s.garden.avg.toFixed(1) + ' · ' + s.clean.avg.toFixed(1)),
+          el('small', {}, 'הציונים הנמוכים בסקר'),
+          el('p', {}, 'עצים, פחים, צואת כלבים ותחזוקה בשכונות'))),
+      quote(R.quotes.services)),
+
+    slide('sky', 'תרבות ופאב',
+      ...head('party-popper', 'תרבות ופאב', 'מה שמחבר את היישוב'),
+      el('div', { class: 'r-figs two' },
+        fig(P(k.fewer), 'מעדיפים פחות אירועים, אבל יותר מושקעים', from(k.fewer)),
+        fig(P(k.volunteer), 'ישמחו להתנדב באירועים מדי פעם', from(k.volunteer)),
+        fig(P(k.visited), 'כבר ביקרו בפאב', from(k.visited)),
+        fig(P(k.pubTop), 'נתנו לפאב 8 עד 10', from(k.pubTop))),
+      el('p', { class: 'r-block-h' }, 'מה מביא אנשים לפאב? ', el('small', {}, 'אפשר היה לבחור כמה · ' + k.came.of + ' ענו')),
+      bars(k.came.opts.slice(0, 3), k.came.of),
+      el('p', { class: 'r-note' }, 'ועוד: ' + k.came.opts.slice(3).map(([l, n]) => l + ' ' + pct(n, k.came.of) + '%').join(', ')),
+      quote(R.quotes.pub)),
+
+    slide('green', 'התקציב',
+      ...head('hand-coins', 'התקציב', 'קשה להעריך את התקציב', 'עד כמה התקציב משקף את סדרי העדיפויות של היישוב? · ' + b.of + ' ענו'),
+      stack([['ענו "לא יודע/ת"', b.dk, 'var(--bar)'], ['נתנו ציון', b.scored, 'var(--neutral)']], b.of),
+      el('p', { class: 'r-s-lead', style: 'margin:10px 0 0' }, 'הציון הממוצע אצל ' + b.scored + ' שנתנו ציון: ', el('b', {}, b.avg.toFixed(1)), ' מתוך 10'),
+      el('p', { class: 'r-block-h' }, 'מה חזר בהצעות לתקציב'),
+      el('ul', { class: 'r-themes' },
+        el('li', {}, 'ניקיון, גינון ומרחב ציבורי'),
+        el('li', {}, 'נוער וחינוך, כולל שכר לרכזים'),
+        el('li', {}, 'אירועים וקהילה'),
+        el('li', {}, 'להבין את התקציב: בראשי פרקים, באחוזים, מה נכנס ומה יצא')),
+      quote(R.quotes.budget)),
+
+    slide(null, 'תודה',
+      poster('סקר התושבים · נופי פרת · תשפ״ז', 'תודה', 'לכל מי שענה!', 'על כל תשובה, הערה ורעיון.'),
+      el('p', { class: 'r-cover-sub' }, el('a', { href: '#1', onclick: (e) => { e.preventDefault(); go(0); } }, 'חזרה להתחלה'))),
+  ];
+}
+
+// ── ניווט ────────────────────────────────────────────────
+
+const deck = document.getElementById('deck');
+const slides = buildSlides();
+deck.append(...slides);
+const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const dots = document.getElementById('dots');
+const prevBtn = document.getElementById('prev'), nextBtn = document.getElementById('next');
+prevBtn.append(icon('arrow-right'));
+slides.forEach((s, i) => dots.append(el('button', { 'aria-label': 'שקף ' + (i + 1), onclick: () => go(i) })));
+let cur = -1;
+
+function go(i, instant) {
+  i = Math.max(0, Math.min(slides.length - 1, i));
+  slides[i].scrollIntoView({ behavior: instant || reduce ? 'auto' : 'smooth', inline: 'start', block: 'nearest' });
+}
+
+function setCur(i) {
+  if (i === cur) return;
+  cur = i;
+  [...dots.children].forEach((d, j) => d.classList.toggle('on', j === i));
+  document.getElementById('count').textContent = (i + 1) + '/' + slides.length;
+  prevBtn.disabled = i === 0;
+  const last = i === slides.length - 1;
+  nextBtn.replaceChildren(i === 0 ? 'לתוצאות' : last ? 'מההתחלה' : 'הבא', icon(last ? 'rotate-ccw' : 'arrow-left'));
+  history.replaceState(null, '', i ? '#' + (i + 1) : location.pathname + location.search);
+}
+
+prevBtn.addEventListener('click', () => go(cur - 1));
+nextBtn.addEventListener('click', () => go(cur === slides.length - 1 ? 0 : cur + 1));
+// בעברית "הבא" משמאל
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft' || e.key === 'PageDown') { e.preventDefault(); go(cur + 1); }
+  else if (e.key === 'ArrowRight' || e.key === 'PageUp') { e.preventDefault(); go(cur - 1); }
+  else if (e.key === 'Home') go(0);
+  else if (e.key === 'End') go(slides.length - 1);
+});
+
+// השקף הנוכחי: מה שתופס את רוב המסך
+const io = new IntersectionObserver((entries) => {
+  entries.forEach(en => { if (en.isIntersecting && en.intersectionRatio >= 0.6) setCur(slides.indexOf(en.target)); });
+}, { root: deck, threshold: [0.6] });
+slides.forEach(s => io.observe(s));
+
+const start = Math.max(0, Math.min(slides.length - 1, (parseInt(location.hash.slice(1), 10) || 1) - 1));
+setCur(start);
+if (start) requestAnimationFrame(() => go(start, true));
+</script>
+</body>
+</html>
