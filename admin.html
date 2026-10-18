@@ -52,6 +52,9 @@ const A = {
   legacy: false,  // השאלון עוד לא נשמר מכאן אף פעם
   settings: {},
   answered: {},   // כמה ענו על כל שאלה
+  committees: [],      // קישורים לוועדות: { id, name, chapters, key }. נשמרים בנפרד מהשאלון
+  committeesSaved: '', // מה ששמור בשרת (JSON)
+  cmOpen: new Set(),   // ועדות שבהן פתחו את בחירת הנושאים
   tab: 'topics',
   chId: null,     // הנושא שפתוח לעריכה
   open: {},       // שאלות פתוחות לעריכה
@@ -62,7 +65,7 @@ const clone = (o) => JSON.parse(JSON.stringify(o));
 init();
 
 function init() {
-  window.addEventListener('beforeunload', (e) => { if (isDirty()) { e.preventDefault(); e.returnValue = ''; } });
+  window.addEventListener('beforeunload', (e) => { if (isDirty() || committeesDirty()) { e.preventDefault(); e.returnValue = ''; } });
   const pw = sessionStorage.getItem(PW_KEY);
   if (pw) load(pw); else renderLogin();
 }
@@ -99,6 +102,8 @@ async function load(pw) {
     A.rev = res.rev || '';
     A.settings = res.settings || {};
     A.answered = res.answered || {};
+    A.committees = clone(res.committees || []);
+    A.committeesSaved = JSON.stringify(A.committees);
     // שרת ריק, או שעוד לא נשמר מכאן: מתחילים מהשאלון שבקוד (זה מה שהאתר מציג עכשיו)
     A.legacy = !!res.legacy || !res.survey;
     A.survey = clone(mergeSurvey(res.survey, window.SURVEY_DATA, A.legacy));
@@ -214,12 +219,13 @@ function showErrors(errors) {
 
 function render() {
   const tabs = el('div', { class: 'seg', role: 'tablist' },
-    ...[['topics', 'נושאים ושאלות'], ['texts', 'טקסטים'], ['settings', 'הגדרות']].map(([id, t]) =>
+    ...[['topics', 'נושאים ושאלות'], ['texts', 'טקסטים'], ['committees', 'ועדות'], ['settings', 'הגדרות']].map(([id, t]) =>
       el('button', {
         class: 'seg-btn' + (A.tab === id ? ' sel' : ''), role: 'tab', 'aria-selected': A.tab === id ? 'true' : 'false',
         onclick: () => { A.tab = id; A.chId = null; render(); window.scrollTo(0, 0); },
       }, t)));
-  const body = A.tab === 'texts' ? renderTexts() : A.tab === 'settings' ? renderSettings() : A.chId ? renderChapter() : renderTopics();
+  const body = A.tab === 'texts' ? renderTexts() : A.tab === 'settings' ? renderSettings() : A.tab === 'committees' ? renderCommittees()
+    : A.chId ? renderChapter() : renderTopics();
   show(el('div', {},
     tabs,
     A.legacy ? el('p', { class: 'adm-banner' }, 'שמירה ראשונה מכאן מעדכנת את השאלון בשרת.') : null,
@@ -620,6 +626,110 @@ function faqEditor(list) {
   };
   draw();
   return wrap;
+}
+
+// ── ועדות: לכל ועדה קישור משלה לדשבורד ───────────────────
+// מי שפותח את הקישור רואה רק את הנושאים שסומנו לוועדה, בלי שמות העונים. השרת מסנן (getCommitteeResults).
+// נשמר בכפתור משלו, בנפרד מהשאלון
+
+function committeesDirty() {
+  return JSON.stringify(A.committees) !== A.committeesSaved;
+}
+
+function committeeUrl(key) {
+  return new URL('dashboard.html#k=' + key, location.href).href;
+}
+
+function renderCommittees() {
+  const topics = A.survey.chapters.filter(c => c.id !== 'about' && c.active !== false);
+  return el('div', {},
+    el('p', { class: 'adm-hint mb' }, 'לכל ועדה קישור משלה לדשבורד. מי שפותח אותו רואה רק את הנושאים שסומנו כאן, בלי שמות העונים.'),
+    ...A.committees.map((c, i) => committeeCard(c, i, topics)),
+    el('button', { class: 'btn btn-ghost btn-block mt', onclick: () => { A.committees.push({ name: '', chapters: [] }); rerender(); } }, icon('plus'), 'ועדה חדשה'),
+    el('button', { class: 'btn btn-primary btn-block mt', id: 'cmSave', disabled: !committeesDirty(), onclick: (e) => saveCommittees(e.currentTarget) },
+      committeesDirty() ? 'שמירת הוועדות' : 'הכול שמור'));
+}
+
+function committeeCard(c, i, topics) {
+  // סגור: רק הנושאים שסומנו, ו"שינוי". ועדה חדשה נפתחת ישר לבחירה
+  if (c.key && !A.cmOpen.has(c.id)) {
+    const titles = c.chapters.map(id => (A.survey.chapters.find(t => t.id === id) || { title: id }).title);
+    return committeeShell(c, i, el('p', { class: 'cm-sum' }, titles.join(' · '),
+      el('button', { class: 'link-btn', onclick: () => { A.cmOpen.add(c.id); rerender(); } }, 'שינוי')));
+  }
+  const chips = el('div', { class: 'cm-topics' }, ...topics.map(ch => {
+    const cb = el('input', { type: 'checkbox' });
+    cb.checked = c.chapters.includes(ch.id);
+    cb.addEventListener('change', () => {
+      // בסדר של הסקר, ונושא מוסתר שכבר סומן נשאר
+      c.chapters = A.survey.chapters.filter(t => (t.id === ch.id ? cb.checked : c.chapters.includes(t.id))).map(t => t.id);
+      refreshCommitteesSave();
+    });
+    return el('label', { class: 'cm-chip' }, cb, el('span', {}, ch.title));
+  }));
+  return committeeShell(c, i, chips);
+}
+
+// השם, הכפתורים והקישור. topicsNode: התגיות לבחירה, או השורה המקוצרת
+function committeeShell(c, i, topicsNode) {
+  const name = el('input', { class: 'txt-input', placeholder: 'שם הוועדה', 'aria-label': 'שם הוועדה' });
+  name.value = c.name || '';
+  name.addEventListener('input', () => { c.name = name.value; refreshCommitteesSave(); });
+
+  let link;
+  if (!c.key) link = el('p', { class: 'adm-hint' }, 'הקישור ייווצר בשמירה.');
+  else if (c.rotate) link = el('p', { class: 'adm-hint' }, 'קישור חדש ייווצר בשמירה, והנוכחי יפסיק לעבוד.');
+  else {
+    const url = committeeUrl(c.key);
+    link = el('div', { class: 'cm-link' },
+      el('input', { class: 'txt-input', readonly: true, dir: 'ltr', value: url, 'aria-label': 'הקישור של ' + c.name, onfocus: (e) => e.target.select() }),
+      el('button', { class: 'btn btn-ghost btn-sm', onclick: () => copyText(url) }, 'העתקה'),
+      navigator.share ? el('button', { class: 'btn btn-ghost btn-sm', onclick: () => navigator.share({ title: 'תוצאות הסקר: ' + c.name, url }).catch(() => {}) }, 'שליחה') : null,
+      el('a', { class: 'btn btn-ghost btn-sm', href: url, target: '_blank', rel: 'noopener' }, 'פתיחה'));
+  }
+
+  return el('div', { class: 'card cm-card' },
+    el('div', { class: 'cm-head' }, name,
+      c.key && !c.rotate ? iconBtn('rotate-ccw', 'קישור חדש', false, () => confirmModal('להחליף את הקישור?', 'הקישור הנוכחי יפסיק לעבוד, ואת החדש צריך לשלוח לוועדה.', 'קישור חדש', () => { c.rotate = true; rerender(); })) : null,
+      iconBtn('trash-2', 'מחיקה', false, () => confirmModal('למחוק את הוועדה?', c.key ? 'אחרי השמירה הקישור שלה יפסיק לעבוד.' : '', 'מחיקה', () => { A.committees.splice(i, 1); rerender(); }))),
+    topicsNode, link);
+}
+
+// הכפתור מתעדכן בלי לצייר מחדש, כדי לא לקטוע הקלדה
+function refreshCommitteesSave() {
+  const b = document.getElementById('cmSave');
+  if (!b) return;
+  const dirty = committeesDirty();
+  b.disabled = !dirty;
+  b.textContent = dirty ? 'שמירת הוועדות' : 'הכול שמור';
+}
+
+async function saveCommittees(btn) {
+  const bad = A.committees.find(c => !String(c.name || '').trim() || !c.chapters.length);
+  if (bad) { showToast(String(bad.name || '').trim() ? '"' + bad.name.trim() + '": צריך לסמן לפחות נושא אחד' : 'לכל ועדה צריך שם', 'warning'); return; }
+  btn.disabled = true;
+  btn.textContent = 'שומר…';
+  try {
+    const res = await apiPost('saveCommittees', { password: A.pw, committees: A.committees.map(c => ({ id: c.id, name: c.name.trim(), chapters: c.chapters, rotate: !!c.rotate })) });
+    if (!res.success) throw new ServerSaid(res.message);
+    A.committees = res.committees;
+    A.committeesSaved = JSON.stringify(A.committees);
+    A.cmOpen.clear();
+    showToast('נשמר. הקישורים מוכנים', 'success');
+    rerender();
+  } catch (e) {
+    showToast(e instanceof ServerSaid && e.message ? e.message : 'לא נשמר, נסו שוב', 'error');
+    refreshCommitteesSave();
+  }
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast('הקישור הועתק', 'success', 1800);
+  } catch (e) {
+    showToast('לא הצלחתי להעתיק. אפשר לסמן את הקישור ולהעתיק', 'warning');
+  }
 }
 
 // ── הגדרות (נשמרות מיד) ──────────────────────────────────

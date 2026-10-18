@@ -1297,6 +1297,37 @@ select.txt-input { appearance: auto; padding-block: 11px; }
 
 .err-list { padding-inline-start: 20px; display: grid; gap: 6px; color: var(--ink-soft); font-size: 14.5px; }
 
+/* ועדות: שם, הנושאים שלה (תגיות שמסמנים) והקישור */
+.cm-head { display: flex; align-items: center; gap: 6px; }
+
+.cm-head .txt-input { flex: 1; min-width: 0; font-weight: 600; }
+
+.cm-topics { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0; }
+
+.cm-sum { margin: 10px 2px; font-size: 14.5px; font-weight: 500; color: var(--ink-soft); }
+
+.cm-sum .link-btn { padding: 4px 8px; font-size: 14px; }
+
+.cm-chip { position: relative; }
+
+.cm-chip input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+
+.cm-chip span {
+  display: inline-block; padding: 6px 12px; border-radius: 99px;
+  border: 1.5px solid var(--line-strong); background: var(--surface);
+  font-size: 14px; font-weight: 500; color: var(--ink-soft); cursor: pointer;
+}
+
+.cm-chip input:checked + span { background: var(--teal); border-color: var(--teal); color: #fff; }
+
+.cm-chip input:focus-visible + span { outline: 3px solid var(--ochre); outline-offset: 2px; }
+
+.cm-link { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.cm-link .txt-input { flex: 1 1 100%; min-width: 0; font-size: 13px; padding: 9px 10px; color: var(--ink-soft); }
+
+.cm-link .btn { flex: 1; }
+
 /* פס שמירה */
 .save-bar {
   position: fixed; inset-inline: 0; bottom: 0; z-index: 60;

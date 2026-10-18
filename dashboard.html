@@ -19,9 +19,9 @@
 
 <header class="topbar wide-bar">
   <div class="topbar-in">
-    <span class="brand">דשבורד הצוות · נופי פרת</span>
+    <span class="brand" id="brand">דשבורד הצוות · נופי פרת</span>
     <div class="spacer"></div>
-    <a class="btn btn-ghost btn-sm" href="admin.html">ניהול הסקר</a>
+    <a class="btn btn-ghost btn-sm" href="admin.html" id="adminLink">ניהול הסקר</a>
   </div>
 </header>
 
@@ -36,7 +36,12 @@ const D = {
   openSearch: '', openTopic: '',           // תשובות פתוחות
   personRid: '', personSearch: '',         // לפי עונה
   byQ: '',                                 // לפי שאלה
+  committee: null,                         // { name, chapters } כשנכנסים בקישור של ועדה
 };
+
+// קישור של ועדה (dashboard.html#k=<מפתח>, נוצר בדף הניהול): בלי סיסמה, רק הנושאים של הוועדה ובלי שמות.
+// השרת מסנן (getCommitteeResults). כאן רק מסתירים מה ששייך לניהול הסקר: משפך, קצב, הגרלה והגיליון
+const COMMITTEE_KEY = (location.hash.match(/[#&]k=([0-9a-f]{32})/) || [])[1] || '';
 
 // מה מוצג בזמן הטעינה: שלבים אמיתיים, ובין לבין כמה בשביל ההומור (רעיון של אורי), כדי שהמתנה ארוכה תרגיש סבירה
 const LOAD_STEPS = [
@@ -63,8 +68,21 @@ const DIM_LABEL = {
 init();
 
 async function init() {
+  if (COMMITTEE_KEY) {
+    document.getElementById('adminLink').remove();
+    document.getElementById('brand').textContent = 'תוצאות הסקר · נופי פרת';
+    return load(null);
+  }
   const savedPw = sessionStorage.getItem('np_dash_pw');
   if (savedPw) { load(savedPw); } else { renderLogin(); }
+}
+
+// קישור של ועדה שלא עובד (הוחלף, נמחק או הועתק חלקית): אין סיסמה להציע, רק הסבר
+function renderLinkError(msg) {
+  document.getElementById('app').replaceChildren(el('div', { class: 'card login-card center' },
+    el('h2', { class: 'mb' }, 'הקישור לא עובד'),
+    el('p', {}, msg || 'בקשו מצוות היישוב את הקישור העדכני של הוועדה.'),
+    el('button', { class: 'btn btn-ghost mt', onclick: () => location.reload() }, 'נסו שוב')));
 }
 
 function renderLogin(err) {
@@ -86,10 +104,22 @@ async function load(password) {
   app.replaceChildren(loadingSteps(LOAD_STEPS, { slow: SLOW_MSG }));
   try {
     if (isLocalMode()) throw new Error('SCRIPT_URL עדיין לא הוגדר ב-config.js');
-    const res = await apiPost('getResults', { password }); // POST: הסיסמה לא נכנסת לכתובת
-    if (!res.success) { sessionStorage.removeItem('np_dash_pw'); return renderLogin(res.message); }
-    sessionStorage.setItem('np_dash_pw', password);
+    // POST: הסיסמה והמפתח לא נכנסים לכתובת שנשלחת לשרת
+    const res = await apiPost('getResults', COMMITTEE_KEY ? { committee: COMMITTEE_KEY } : { password });
+    if (!res.success) {
+      if (COMMITTEE_KEY) return renderLinkError(res.message);
+      sessionStorage.removeItem('np_dash_pw');
+      return renderLogin(res.message);
+    }
+    if (!COMMITTEE_KEY) sessionStorage.setItem('np_dash_pw', password);
     D.rows = res.rows; D.survey = mergeSurvey(res.survey, window.SURVEY_DATA, res.legacy); D.raffleCount = res.raffleCount || 0; D.identified = res.identified || 0;
+    D.committee = res.committee || null;
+    if (D.committee) {
+      // השרת כבר שלח רק את הנושאים של הוועדה. ליתר ביטחון, גם השאלון שמוצג כאן מצומצם אליהם
+      D.survey = Object.assign({}, D.survey, { chapters: D.survey.chapters.filter(ch => ch.id === 'about' || D.committee.chapters.includes(ch.id)) });
+      document.getElementById('brand').textContent = 'תוצאות הסקר · ' + D.committee.name;
+      document.title = 'תוצאות הסקר · ' + D.committee.name;
+    }
     // מיזוג לפי עונה: תשובה אחרונה גוברת. דילוג (_skipped) נספר בנפרד ולא כמענה
     D.respondents = {};
     D.rows.forEach(r => {
@@ -191,13 +221,18 @@ function render() {
     mkTab('compare', 'השוואה בין קבוצות'), mkTab('open', 'תשובות פתוחות'));
   D.survey.chapters.forEach(ch => tabs.append(mkTab(ch.id, icon(ch.icon || 'list-checks'), ch.title)));
 
-  const kids = [
-    el('div', { class: 'stat-row', style: 'margin-top:20px' },
-      statTile(list.length, D.filter ? 'עונים בפילוח' : 'עונים'),
+  // ועדה: מי שענה על הנושאים שלה, ומי שסימן שהם לא רלוונטיים אליו ("קצת עליך" לא נספר כנושא)
+  const answeredTopic = r => Object.keys(r.chapters).some(id => id !== 'about');
+  const tiles = D.committee
+    ? [statTile(list.filter(answeredTopic).length, D.filter ? 'ענו, בפילוח' : 'ענו'),
+      statTile(list.filter(r => !answeredTopic(r)).length, 'סימנו "לא רלוונטי"'),
+      D.committee.chapters.length > 1 ? statTile(list.reduce((a, r) => a + Object.keys(r.chapters).filter(id => id !== 'about').length, 0), 'נושאים שנענו') : null]
+    : [statTile(list.length, D.filter ? 'עונים בפילוח' : 'עונים'),
       statTile(submitted, 'נושאים שנענו'),
       statTile(list.length ? (submitted / list.length).toFixed(1) : '0', 'נושאים לעונה בממוצע'),
-      statTile(D.raffleCount, 'נרשמו להגרלה'),
-    ),
+      statTile(D.raffleCount, 'נרשמו להגרלה')];
+  const kids = [
+    el('div', { class: 'stat-row', style: 'margin-top:20px' }, ...tiles),
     renderFilter(),
     tabs,
   ];
@@ -226,8 +261,11 @@ function renderOverview(list) {
     return wrap;
   }
 
-  wrap.append(renderFunnel(list));
-  wrap.append(el('div', { class: 'dash-grid two' }, renderPace(list), renderHours(list)));
+  // משפך, קצב ושעות: ניהול ההפצה של הסקר, לא תוצאות. לוועדה לא מציגים
+  if (!D.committee) {
+    wrap.append(renderFunnel(list));
+    wrap.append(el('div', { class: 'dash-grid two' }, renderPace(list), renderHours(list)));
+  }
   wrap.append(renderWho(list));
   wrap.append(renderGaps(list));
 
@@ -259,7 +297,10 @@ function renderOverview(list) {
     scales.push({ ch, q, n: vals.length, avg, norm: normScore(avg, q) });
   }));
   scales.sort((a, b) => a.norm - b.norm);
-  if (scales.length) {
+  if (scales.length && scales.length < 6) {
+    // מעט סולמות (בדרך כלל אצל ועדה): רשימה אחת מהגבוה לנמוך, בלי "נמוכים" ו"גבוהים" שחוזרים על אותן שאלות
+    wrap.append(el('div', { class: 'card' }, el('h3', { class: 'mb' }, 'הציונים'), ...scales.slice().reverse().map(scaleRow)));
+  } else if (scales.length) {
     const lows = scales.slice(0, 6), highs = scales.slice(-6).reverse();
     wrap.append(
       el('div', { class: 'card' }, el('h3', { class: 'mb' }, 'הציונים הנמוכים ביותר: כאן כואב'), ...lows.map(scaleRow)),
@@ -715,8 +756,8 @@ function fmtTime(ts) {
 
 const personName = p => String(p.answers.about_name || '').trim();
 
-// "#12 · דנה כהן" (או "#12 · בלי שם")
-const personTitle = p => '#' + p.num + ' · ' + (personName(p) || 'בלי שם');
+// "#12 · דנה כהן" (או "#12 · בלי שם"). לוועדה השמות לא מגיעים, אז רק המספר
+const personTitle = p => (D.committee ? 'עונה #' + p.num : '#' + p.num + ' · ' + (personName(p) || 'בלי שם'));
 
 // גיל, ותק ומגורים בשורה אחת, ליד כל תשובה
 function personBrief(p) {
@@ -748,7 +789,7 @@ function stepNav(i, n, go) {
 
 // הגיליון: אותן תשובות בטבלה אחת. הלחיצה גם מבקשת מהשרת לעדכן את הטאב (בלי לחכות לו)
 function sheetHint() {
-  if (!CONFIG.SHEETS_URL) return null;
+  if (!CONFIG.SHEETS_URL || D.committee) return null; // לוועדה אין גישה לגיליון (יש בו הכול, כולל שמות)
   return el('p', { class: 'small muted mt' }, 'כל התשובות גם בגיליון, שורה לכל עונה: ',
     el('a', {
       href: CONFIG.SHEETS_URL, target: '_blank', rel: 'noopener',
@@ -768,7 +809,7 @@ function renderPerson(list) {
   const key = p => ('#' + p.num + ' ' + personName(p) + ' ' + p.rid).toLowerCase();
   const matches = () => { const t = D.personSearch.trim().toLowerCase().replace(/^#/, ''); return t ? people.filter(p => key(p).includes(t)) : people; };
 
-  const search = el('input', { class: 'txt-input', type: 'search', placeholder: 'חיפוש לפי שם, מספר או קוד', 'aria-label': 'חיפוש עונה' });
+  const search = el('input', { class: 'txt-input', type: 'search', placeholder: D.committee ? 'חיפוש לפי מספר עונה' : 'חיפוש לפי שם, מספר או קוד', 'aria-label': 'חיפוש עונה' });
   search.value = D.personSearch;
   const sel = el('select', { class: 'txt-input', 'aria-label': 'עונה' });
   const nav = el('div', {});
@@ -808,8 +849,8 @@ function personView(p) {
   const details = (about ? about.questions : []).filter(q => q.id !== 'about_name' && hasVal(p.answers[q.id]));
 
   const head = el('div', { class: 'card person-head' },
-    el('h2', { class: 'person-name' }, personName(p) || 'בלי שם'),
-    el('p', { class: 'small muted' }, '#' + p.num + ' · קוד ' + p.rid + ' · התחיל ' + fmtTime(p.first) + (p.last !== p.first ? ' · עדכון אחרון ' + fmtTime(p.last) : '')),
+    el('h2', { class: 'person-name' }, D.committee ? 'עונה #' + p.num : personName(p) || 'בלי שם'),
+    el('p', { class: 'small muted' }, (D.committee ? '' : '#' + p.num + ' · קוד ' + p.rid + ' · ') + 'התחיל ' + fmtTime(p.first) + (p.last !== p.first ? ' · עדכון אחרון ' + fmtTime(p.last) : '')),
     details.length
       ? el('dl', { class: 'person-details' }, ...details.flatMap(q => [el('dt', {}, DIM_LABEL[q.id] || q.text), el('dd', {}, Array.isArray(p.answers[q.id]) ? p.answers[q.id].join(', ') : String(p.answers[q.id]))]))
       : el('p', { class: 'small muted mt' }, '"קצת עליך" עוד לא מולא'),

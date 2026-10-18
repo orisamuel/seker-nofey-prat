@@ -404,5 +404,37 @@ post({ action: 'saveSettings', password: pw(), surveyOpen: true });
 check('closed: switching it on in the admin changes nothing', get({ action: 'getSurvey' }).open === false);
 check('closed: dashboard and saved topics still work', post({ action: 'getResults', password: pw() }).success && post({ action: 'savedTopics', rid: A }).success);
 
+// ── 16. קישורים לוועדות: לכל ועדה קישור משלה, רק הנושאים שלה, בלי שמות ──
+r = post({ action: 'getAdmin', password: pw() });
+const topicIds = ctx.loadSurvey(false).chapters.filter(c => c.id !== 'about').map(c => c.id);
+// נוצרו בכניסה הראשונה לדף הניהול (סעיף 13), כשגם פינת החי עוד הייתה פעילה
+check('committees: one per topic by default, each with its own key', r.success && topicIds.every(id => r.committees.some(c => c.chapters.join() === id)) && r.committees.every(c => c.chapters.length === 1 && /^[0-9a-f]{32}$/.test(c.key)) && new Set(r.committees.map(c => c.key)).size === r.committees.length, r.committees && r.committees.length);
+check('committees: the same links on the next load', JSON.stringify(post({ action: 'getAdmin', password: pw() }).committees) === JSON.stringify(r.committees));
+const comm = r.committees.find(c => c.chapters[0] === 'community');
+const cr = post({ action: 'getResults', committee: comm.key });
+check('committee: its topic and "about", nothing else', cr.success && cr.rows.some(x => x.chapter === 'community') && cr.rows.every(x => x.chapter === 'community' || x.chapter === 'about'), cr.message || [...new Set((cr.rows || []).map(x => x.chapter))]);
+check('committee: no names anywhere', cr.success && !/about_name|HYPERLINK/.test(JSON.stringify(cr)));
+check('committee: survey has its topic and "about" without the name question', cr.survey.chapters.map(c => c.id).join() === 'about,community' && !cr.survey.chapters[0].questions.some(q => q.id === 'about_name'), cr.survey.chapters.map(c => c.id));
+check('committee: only people who reached its topic', cr.rows.some(x => x.rid === A) && !cr.rows.some(x => x.rid === 'NEWRESP2'));
+check('committee: its name, and no raffle or email counts', cr.committee.name === comm.name && cr.raffleCount === undefined && cr.identified === undefined);
+check('committee: made-up or broken keys get nothing', ['f'.repeat(32), 'x', ''].every(k => !post({ action: 'getResults', committee: k }).rows));
+// עריכה בדף הניהול: שני נושאים לוועדה אחת עם שם חדש, קישור חדש לוועדה אחרת, ועדה חדשה
+const list = r.committees.map(c => ({ id: c.id, name: c.name, chapters: c.chapters.slice() }));
+const noar = list.find(c => c.chapters[0] === 'noar'), scouts = list.find(c => c.chapters[0] === 'scouts');
+noar.name = 'ועדת נוער'; noar.chapters = ['noar', 'scouts', 'nope'];
+const keep = list.filter(c => c !== scouts);
+keep.find(c => c.id === comm.id).rotate = true;
+keep.push({ name: 'ועדה חדשה', chapters: ['lib', 'zoo'] });
+const sr = post({ action: 'saveCommittees', password: pw(), committees: keep });
+const savedNoar = sr.success && sr.committees.find(c => c.id === noar.id);
+check('committees: merge and rename keep the link, unknown topic dropped', savedNoar && savedNoar.name === 'ועדת נוער' && savedNoar.chapters.join() === 'noar,scouts' && savedNoar.key === r.committees.find(c => c.id === noar.id).key, sr.message || savedNoar);
+check('committees: the merged link shows both topics', post({ action: 'getResults', committee: savedNoar.key }).survey.chapters.map(c => c.id).join() === 'about,noar,scouts');
+check('committees: a new link replaces the old one', !post({ action: 'getResults', committee: comm.key }).success && post({ action: 'getResults', committee: sr.committees.find(c => c.id === comm.id).key }).success);
+check('committees: a removed committee\'s link stops working', !post({ action: 'getResults', committee: r.committees.find(c => c.id === scouts.id).key }).success);
+check('committees: a new committee gets its own link', sr.committees.length === keep.length && /^[0-9a-f]{32}$/.test(sr.committees[sr.committees.length - 1].key) && !r.committees.some(c => c.key === sr.committees[sr.committees.length - 1].key));
+check('committees: wrong password saves nothing', !post({ action: 'saveCommittees', password: 'nope', committees: [] }).success && post({ action: 'getAdmin', password: pw() }).committees.length === keep.length);
+check('committees: a name and at least one real topic are required', !post({ action: 'saveCommittees', password: pw(), committees: [{ name: ' ', chapters: ['lib'] }] }).success && !post({ action: 'saveCommittees', password: pw(), committees: [{ name: 'x', chapters: ['nope', 'about'] }] }).success);
+delete cache.pw_fails;
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

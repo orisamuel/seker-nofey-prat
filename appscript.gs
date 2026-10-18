@@ -311,6 +311,7 @@ function getAdmin(password) {
       // closedForGood: נסגר בקוד (SURVEY_CLOSED), והמתג בדף הניהול לא פותח אותו
       settings: { surveyOpen: !closedError(settings), closedForGood: SURVEY_CLOSED, publicReport: settings.publicReport === 'כן' },
       answered: answeredCounts(),
+      committees: loadCommittees(true),
     };
   } catch (e) {
     return { success: false, message: e.toString() };
@@ -1007,6 +1008,103 @@ function getResults(password) {
   }
 }
 
+// ============================================================
+// קישורים לוועדות (18/10/2026, בקשה של אורי): לכל ועדה קישור משלה לדשבורד, dashboard.html#k=<מפתח>,
+// שמראה רק את הנושאים שסומנו לה. המפתח בקישור הוא הסיסמה של הוועדה, והשרת מסנן: שורות של נושאים
+// אחרים לא יוצאות בכלל. שמות העונים לא נשלחים לוועדות. "קצת עליך" כן (לפילוח), רק של מי שענה על
+// נושא של הוועדה. הוועדות שמורות בטאב "הגדרות" (committees, JSON), ונערכות בדף הניהול.
+// ============================================================
+
+const MAX_COMMITTEES = 40;
+const COMMITTEES_NOTE = 'קישורים לוועדות: שם, נושאים ומפתח. נערך בדף הניהול, לשונית "ועדות"';
+
+function newCommitteeKey() { return Utilities.getUuid().replace(/-/g, ''); } // 32 תווים, אי אפשר לנחש
+function newCommitteeId() { return 'c' + Utilities.getUuid().replace(/-/g, '').slice(0, 10); }
+
+// הוועדות השמורות. create: בפעם הראשונה נוצרת ועדה לכל נושא, כל אחת עם קישור משלה
+function loadCommittees(create) {
+  const saved = parseJsonSafe(getSettings().committees, null);
+  if (Array.isArray(saved) || !create) return Array.isArray(saved) ? saved : [];
+  return withLock(function () {
+    const again = parseJsonSafe(getSettings().committees, null); // אולי מישהו אחר יצר בינתיים
+    if (Array.isArray(again)) return again;
+    const survey = loadSurvey(false);
+    const made = (survey ? chaptersInOrder(survey) : []).filter(function (ch) { return ch.id !== 'about'; })
+      .map(function (ch) { return { id: newCommitteeId(), name: ch.title, chapters: [ch.id], key: newCommitteeKey() }; });
+    upsertSetting(ensureSheet(T_SETTINGS, ['מפתח', 'ערך', 'הסבר']), 'committees', JSON.stringify(made), COMMITTEES_NOTE);
+    return made;
+  });
+}
+
+// הרשימה מדף הניהול. ועדה קיימת שומרת את המפתח שלה, אלא אם ביקשו קישור חדש (rotate). ועדה חדשה מקבלת מפתח
+function saveCommittees(password, listJson) {
+  try {
+    const pwErr = passwordError(password);
+    if (pwErr) return { success: false, message: pwErr };
+    const list = parseJsonSafe(listJson, null);
+    if (!Array.isArray(list) || list.length > MAX_COMMITTEES) return { success: false, message: 'רשימת הוועדות לא תקינה' };
+    const survey = loadSurvey(true);
+    const valid = {};
+    (survey ? survey.chapters : []).forEach(function (ch) { if (ch.id !== 'about') valid[ch.id] = true; });
+    return withLock(function () {
+      const old = {};
+      loadCommittees(false).forEach(function (c) { old[c.id] = c; });
+      const out = [];
+      for (let i = 0; i < list.length; i++) {
+        const c = list[i] || {};
+        const name = String(c.name || '').trim().slice(0, 60);
+        const chapters = (Array.isArray(c.chapters) ? c.chapters : []).map(String)
+          .filter(function (id, j, a) { return valid[id] && a.indexOf(id) === j; });
+        if (!name) return { success: false, message: 'ועדה מספר ' + (i + 1) + ': חסר שם' };
+        if (!chapters.length) return { success: false, message: '"' + name + '": צריך לסמן לפחות נושא אחד' };
+        const prev = old[c.id];
+        out.push({ id: prev ? prev.id : newCommitteeId(), name: name, chapters: chapters, key: prev && !c.rotate ? prev.key : newCommitteeKey() });
+      }
+      upsertSetting(ensureSheet(T_SETTINGS, ['מפתח', 'ערך', 'הסבר']), 'committees', JSON.stringify(out), COMMITTEES_NOTE);
+      return { success: true, committees: out };
+    });
+  } catch (e) {
+    return { success: false, message: e.toString() };
+  }
+}
+
+// הדשבורד של ועדה: רק הנושאים שלה (ו"קצת עליך" בלי השם), רק של מי שענה או סימן "לא רלוונטי" על אחד מהם
+function getCommitteeResults(key) {
+  try {
+    key = String(key || '').trim();
+    const c = /^[0-9a-f]{32}$/.test(key) ? loadCommittees(false).filter(function (x) { return x.key === key; })[0] : null;
+    if (!c) return { success: false, message: 'הקישור לא תקין, או שהוחלף בקישור חדש. בקשו מצוות היישוב את הקישור העדכני' };
+    const allowed = {};
+    c.chapters.forEach(function (id) { allowed[id] = true; });
+    const raw = getSpreadsheet().getSheetByName(T_RAW);
+    const data = raw && raw.getLastRow() > 1 ? raw.getDataRange().getValues() : [[]];
+    const discarded = discardedRids(data);
+    const touched = {};
+    for (let i = 1; i < data.length; i++) if (allowed[String(data[i][2])]) touched[String(data[i][1])] = true;
+    const rows = [];
+    for (let i = 1; i < data.length; i++) {
+      const rid = String(data[i][1]), ch = String(data[i][2]);
+      if (discarded[rid] || !touched[rid] || !(allowed[ch] || ch === 'about')) continue;
+      const answers = parseJsonSafe(String(data[i][3]), {});
+      if (ch === 'about') delete answers.about_name; // שמות לא יוצאים לוועדות
+      rows.push({ ts: new Date(data[i][0]).toISOString(), rid: rid, chapter: ch, answers: answers });
+    }
+    const settings = getSettings();
+    const survey = publicSurvey();
+    const chapters = (survey ? survey.chapters : [])
+      .filter(function (ch) { return ch.id === 'about' || allowed[ch.id]; })
+      .map(function (ch) {
+        return ch.id !== 'about' ? ch : Object.assign({}, ch, { questions: ch.questions.filter(function (q) { return q.id !== 'about_name'; }) });
+      });
+    return {
+      success: true, rows: rows, committee: { name: c.name, chapters: c.chapters },
+      survey: survey ? { meta: survey.meta, chapters: chapters } : null, legacy: !settings.surveyRev,
+    };
+  } catch (e) {
+    return { success: false, message: e.toString() };
+  }
+}
+
 // דוח ציבורי: מצרפים בלבד — בלי טקסט חופשי, בלי שמות, בלי פילוחים קטנים
 function getPublicReport() {
   try {
@@ -1125,8 +1223,11 @@ function route(e, body) {
       case 'enterRaffle':
         return jsonResponse(enterRaffle(p.rid, p.name, p.phone));
 
-      case 'getResults':
-        return jsonResponse(getResults(p.password));
+      case 'getResults': // הצוות בסיסמה, או ועדה במפתח מהקישור שלה
+        return jsonResponse(p.committee ? getCommitteeResults(p.committee) : getResults(p.password));
+
+      case 'saveCommittees':
+        return jsonResponse(saveCommittees(p.password, typeof p.committees === 'string' ? p.committees : JSON.stringify(p.committees || null)));
 
       case 'getPublicReport':
         return jsonResponse(getPublicReport());
