@@ -8,6 +8,9 @@ const ROOT = path.resolve(process.argv[2] || path.join(__dirname, '..'));
 
 const { createGas } = require('./mock-gas.js');
 const { ctx, SS, props, cache, triggers, logs } = createGas(ROOT);
+// הסקר נסגר סופית בקוד (SURVEY_CLOSED). רוב הבדיקות הן של הסקר הפתוח; הסגירה נבדקת בסוף (סעיף 15)
+const CLOSED_IN_CODE = ctx.SURVEY_CLOSED;
+ctx.SURVEY_CLOSED = false;
 
 const sctx = { window: {} };
 vm.createContext(sctx);
@@ -380,6 +383,26 @@ check('locked after 30 wrong tries, even with the right password', !r.success &&
 check('lock covers the admin page too', /יותר מדי/.test(post({ action: 'getAdmin', password: pw() }).message));
 delete cache.pw_fails; // עשר דקות עברו
 check('unlocked after the window', post({ action: 'getResults', password: pw() }).success);
+
+// ── 15. סגירה סופית בקוד (18/10/2026): שום כתיבה, גם כשהמתג בדף הניהול אומר "פתוח" ──
+check('the live code ships closed', CLOSED_IN_CODE === true);
+ctx.SURVEY_CLOSED = true;
+sset.rows.find(x => x[0] === 'surveyOpen')[1] = 'כן';
+const tabLen = (n) => SS.getSheetByName(n).getLastRow();
+const tabsBefore = ['תשובות גולמי', 'מיילים', 'הגרלה'].map(tabLen);
+const closedOk = (res) => !res.success && res.closed === true && /סגור/.test(res.message); // "סגור": גם דף ישן לא ינסה שוב
+check('closed: getSurvey says closed, still sends the survey', get({ action: 'getSurvey' }).open === false && get({ action: 'getSurvey' }).success);
+check('closed: submit rejected', closedOk(post({ action: 'submitChapter', rid: A, chapter: 'community', answers: { comm_belong: 9 } })));
+check('closed: new email rejected', closedOk(post({ action: 'identify', email: 'late@example.com', rid: 'LATEAAA2' })));
+check('closed: known email rejected too', closedOk(post({ action: 'identify', email: 'dana@example.co.il', rid: A })));
+check('closed: restart rejected', closedOk(post({ action: 'discard', rid: A })));
+check('closed: raffle rejected', closedOk(post({ action: 'enterRaffle', rid: A, name: 'מאוחר מדי', phone: '0501112233' })));
+check('closed: nothing written', JSON.stringify(['תשובות גולמי', 'מיילים', 'הגרלה'].map(tabLen)) === JSON.stringify(tabsBefore), tabsBefore);
+r = post({ action: 'getAdmin', password: pw() });
+check('closed: admin shows closed for good, the switch cannot reopen', r.success && r.settings.surveyOpen === false && r.settings.closedForGood === true, r.settings);
+post({ action: 'saveSettings', password: pw(), surveyOpen: true });
+check('closed: switching it on in the admin changes nothing', get({ action: 'getSurvey' }).open === false);
+check('closed: dashboard and saved topics still work', post({ action: 'getResults', password: pw() }).success && post({ action: 'savedTopics', rid: A }).success);
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

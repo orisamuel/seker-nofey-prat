@@ -40,6 +40,12 @@ const DISCARD_CH = '_בוטל';
 const T_NOTICE = 'קרא אותי';
 const SITE = 'https://sekernofey.online/';
 
+// הסקר נסגר סופית ב-18/10/2026 (אורי): שום פעולה לא כותבת יותר תשובה, מייל, "להתחיל מחדש" או הרשמה
+// להגרלה, בלי קשר למתג בדף הניהול. הדשבורד, הגיליון והדוח ממשיכים לעבוד.
+// לסקר של שנה הבאה: false, ./deploy.sh, וגם SURVEY_CLOSED ב-index.html.
+// var ולא const: הבדיקות (tests/backend.test.js) פותחות אותו כדי לבדוק את הסקר הפתוח
+var SURVEY_CLOSED = true;
+
 // הסקר הציבורי נשמר במטמון (קריאה ופענוח של הטאבים לוקחים כמה שניות). מתחלף בכל שמירה בדף הניהול
 const SURVEY_CACHE = 'survey_public_v1';
 const SURVEY_CACHE_SECS = 21600; // המקסימום ש-Apps Script מאפשר (6 שעות)
@@ -135,6 +141,14 @@ function upsertSetting(sheet, key, value, note) {
     }
   }
   sheet.appendRow([key, textCell(value), note || '']);
+}
+
+// null כשהסקר פתוח, אחרת התשובה לדפדפן. בהודעה חייבת להופיע המילה "סגור": כך הדף, גם גרסה ישנה
+// שעוד פתוחה באיזה דפדפן, יודע שאין טעם לנסות שוב (FINAL_ERROR ב-index.html)
+function closedError(settings) {
+  if (SURVEY_CLOSED) return { success: false, closed: true, message: 'הסקר סגור למענה. תודה לכל מי שהשתתף!' };
+  if ((settings || getSettings()).surveyOpen === 'לא') return { success: false, closed: true, message: 'הסקר סגור כרגע למענה' };
+  return null;
 }
 
 function validEmail(e) {
@@ -294,7 +308,8 @@ function getAdmin(password) {
       survey: loadSurvey(true),
       rev: settings.surveyRev || '',
       legacy: !settings.surveyRev,
-      settings: { surveyOpen: settings.surveyOpen !== 'לא', publicReport: settings.publicReport === 'כן' },
+      // closedForGood: נסגר בקוד (SURVEY_CLOSED), והמתג בדף הניהול לא פותח אותו
+      settings: { surveyOpen: !closedError(settings), closedForGood: SURVEY_CLOSED, publicReport: settings.publicReport === 'כן' },
       answered: answeredCounts(),
     };
   } catch (e) {
@@ -554,7 +569,7 @@ function publicSurvey() {
 function getSurvey() {
   try {
     const settings = getSettings();
-    const open = settings.surveyOpen !== 'לא';
+    const open = !closedError(settings);
     const survey = publicSurvey();
     if (!survey) return { success: false, open: open, message: 'השאלון עוד לא נשמר. נכנסים לדף הניהול ושומרים' };
     return { success: true, survey: survey, open: open, legacy: !settings.surveyRev };
@@ -738,8 +753,8 @@ function writeResults(sheet, survey, people) {
 
 function submitChapter(rid, chapterId, answersJson) {
   try {
-    const settings = getSettings();
-    if (settings.surveyOpen === 'לא') return { success: false, message: 'הסקר סגור כרגע למענה' };
+    const closed = closedError();
+    if (closed) return closed;
 
     rid = normRid(rid);
     if (!rid) return { success: false, message: 'קוד עונה לא תקין' };
@@ -770,6 +785,8 @@ function discardedRids(rawData) {
 // "התחלה מחדש": התשובות הקודמות נשארות בגיבוי הגולמי אבל לא נספרות (וגם לא בטאב "תוצאות")
 function discard(rid) {
   try {
+    const closed = closedError();
+    if (closed) return closed;
     rid = normRid(rid);
     if (!rid) return { success: false, message: 'קוד עונה לא תקין' };
     withLock(function () {
@@ -832,6 +849,8 @@ function savedTopics(rid) {
 
 function identify(email, rid) {
   try {
+    const closed = closedError();
+    if (closed) return closed;
     const norm = normEmail(email);
     rid = normRid(rid);
     if (!norm) return { success: false, message: 'בדקו את כתובת המייל' };
@@ -910,6 +929,8 @@ function profileKeysForLogic() {
 
 function enterRaffle(rid, name, phone) {
   try {
+    const closed = closedError();
+    if (closed) return closed;
     rid = normRid(rid);
     name = String(name || '').trim().slice(0, 80);
     const digits = phoneDigits(phone);

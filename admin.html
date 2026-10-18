@@ -629,7 +629,10 @@ function renderSettings() {
   const pwIn = el('input', { class: 'txt-input', type: 'password', placeholder: 'סיסמה חדשה, לפחות 8 תווים', 'aria-label': 'סיסמה חדשה', autocomplete: 'new-password' });
   return el('div', {},
     el('div', { class: 'card' },
-      toggle('הסקר פתוח למענה', st.surveyOpen !== false, (v) => saveSetting({ surveyOpen: v })),
+      // נסגר סופית בקוד (SURVEY_CLOSED ב-appscript.gs): המתג כבר לא פותח אותו
+      st.closedForGood
+        ? el('p', { class: 'sw-label' }, 'הסקר נסגר למענה (18/10/2026)')
+        : toggle('הסקר פתוח למענה', st.surveyOpen !== false, (v) => saveSetting({ surveyOpen: v })),
       toggle('הדוח הציבורי פעיל', !!st.publicReport, (v) => saveSetting({ publicReport: v })),
       el('p', { class: 'adm-hint' }, el('a', { href: 'report.html', target: '_blank', rel: 'noopener' }, 'לדוח הציבורי'))),
     el('div', { class: 'card' },

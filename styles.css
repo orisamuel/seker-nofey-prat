@@ -174,6 +174,11 @@ a.topbar-btn { text-decoration: none; }
   .progress-rail { display: none; }
 }
 
+/* הסקר נסגר: בסרגל נשאר רק השם */
+body.closed .topbar-btn,
+body.closed .progress-rail,
+body.closed .progress-label { display: none; }
+
 /* באנר תצוגה מקדימה: האתר לא מחובר לשרת */
 .preview-banner {
   background: var(--ochre-soft);

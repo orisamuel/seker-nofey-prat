@@ -4,12 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>סקר התושבים · נופי פרת</title>
-  <meta name="description" content="סקר התושבים השנתי של נופי פרת. הדעה שלך קובעת איך היישוב ייראה בשנה הקרובה">
+  <meta name="description" content="סקר התושבים של נופי פרת נסגר לתשובות. תודה רבה לכל מי שהשתתף!">
   <meta name="theme-color" content="#F6F1E7">
   <meta property="og:type" content="website">
   <meta property="og:locale" content="he_IL">
   <meta property="og:title" content="מה דעתך, נופי פרת? סקר התושבים תשפ״ז">
-  <meta property="og:description" content="בערך 10 דקות. התשובות שלך קובעות איך היישוב ייראה בשנה הקרובה. בין המסיימים מוגרל שובר של 150 ₪ למימוש בפרתיה.">
+  <meta property="og:description" content="הסקר נסגר לתשובות. תודה רבה לכל מי שהשתתף!">
   <!-- תמונת השיתוף בוואטסאפ -->
   <meta property="og:url" content="https://sekernofey.online/">
   <meta property="og:image" content="https://sekernofey.online/og.png">
@@ -87,11 +87,19 @@ const draftKey = (ch) => 'np_draft_' + ch;
 // השוואה מול השרת (ראו reconcile): פעם אחת בכל מכשיר לכל תג
 const SYNC_KEY = 'np_synced';
 const SYNC_TAG = '2026-10-11';
+// הסקר נסגר סופית ב-18/10/2026: מוצגת רק הודעת תודה, מיד, בלי לפנות לשרת ובלי לשלוח כלום (גם לא מה
+// שנשאר בתור במכשיר; השרת דוחה הכול בכל מקרה, SURVEY_CLOSED ב-appscript.gs). לסקר של שנה הבאה: false בשניהם
+const SURVEY_CLOSED = true;
 
 init();
 
 async function init() {
   document.querySelectorAll('[data-icon]').forEach(n => n.replaceWith(icon(n.dataset.icon)));
+  if (SURVEY_CLOSED) {
+    S.survey = window.SURVEY_DATA;
+    document.getElementById('loadingScreen').classList.add('hidden');
+    return goClosed();
+  }
   resetIfNewVersion();
   S.done = JSON.parse(localStorage.getItem(DONE_KEY) || '{}');
   S.remote = JSON.parse(localStorage.getItem(REMOTE_KEY) || '{}');
@@ -142,11 +150,13 @@ function resetIfNewVersion() {
   localStorage.setItem(VER_KEY, ver);
 }
 
+// בסרגל העליון נשאר רק השם (body.closed ב-styles.css): אין מה להמשיך ואין על מה לשאול
 function goClosed() {
   closeModal();
-  const m = S.survey.meta;
+  closeDrawer();
+  document.body.classList.add('closed');
   const view = el('div', { class: 'land' },
-    poster(m, 'הסקר סגור כרגע למענה', 'תודה לכל מי שענה! תקציר התוצאות יפורסם לכל התושבים.', false)
+    poster(S.survey.meta, ['הסקר נסגר', 'לתשובות'], 'תודה רבה לכל מי שהשתתף!', false)
   );
   setView(view, null, 'closed');
 }
@@ -233,6 +243,7 @@ function setView(node, hue, viewName) {
 }
 
 function goHome() {
+  if (SURVEY_CLOSED || S.view === 'closed') return goClosed();
   if (hasStarted()) goCategories(); else goLanding();
 }
 
@@ -275,13 +286,12 @@ function goLanding() {
   setView(view, null, 'landing');
 }
 
-// הפוסטר: כותרת גדולה על רקע לילה, שמש, וגבעות הוואדי בתחתית
+// הפוסטר: כותרת גדולה על רקע לילה, שמש, וגבעות הוואדי בתחתית. headline: [שורה, שורה בצבע] או null
 function poster(m, headline, sub, withStickers) {
+  const [line, accent] = headline || ['מה דעתך,', m.yishuv + '?'];
   const copy = el('div', { class: 'poster-copy' },
     el('p', { class: 'poster-kicker' }, m.title + (m.year ? ' · ' + m.year : '')),
-    headline
-      ? el('h1', { style: 'font-size:64px' }, headline)
-      : el('h1', {}, 'מה דעתך,', el('em', {}, m.yishuv + '?')),
+    el('h1', {}, line, el('em', {}, accent)),
     el('p', { class: 'poster-sub' }, sub)
   );
   const p = el('div', { class: 'poster' }, posterArt(), copy);
