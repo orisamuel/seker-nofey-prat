@@ -90,12 +90,16 @@ const SYNC_TAG = '2026-10-11';
 // הסקר נסגר סופית ב-18/10/2026: מוצגת רק הודעת תודה, מיד, בלי לפנות לשרת ובלי לשלוח כלום (גם לא מה
 // שנשאר בתור במכשיר; השרת דוחה הכול בכל מקרה, SURVEY_CLOSED ב-appscript.gs). לסקר של שנה הבאה: false בשניהם
 const SURVEY_CLOSED = true;
+// גרסת הדגמה ליישובים אחרים (25/10/2026): sekernofey.online/demo, שמעביר ל-/?demo. הסקר המלא בלי שרת:
+// שום דבר לא נשלח, והתשובות נשמרות רק במכשיר. הסקר האמיתי נשאר סגור, כדי שתשובות של משחק לא ייכנסו
+// לנתונים של נופי פרת ולדשבורדים של הוועדות
+const DEMO = new URLSearchParams(location.search).has('demo');
 
 init();
 
 async function init() {
   document.querySelectorAll('[data-icon]').forEach(n => n.replaceWith(icon(n.dataset.icon)));
-  if (SURVEY_CLOSED) {
+  if (SURVEY_CLOSED && !DEMO) {
     S.survey = window.SURVEY_DATA;
     document.getElementById('loadingScreen').classList.add('hidden');
     return goClosed();
@@ -104,8 +108,10 @@ async function init() {
   S.done = JSON.parse(localStorage.getItem(DONE_KEY) || '{}');
   S.remote = JSON.parse(localStorage.getItem(REMOTE_KEY) || '{}');
   S.raffleEntered = localStorage.getItem(RAFFLE_KEY) === 'yes';
-  S.serverMode = !isLocalMode();
-  document.getElementById('previewBanner').hidden = S.serverMode;
+  S.serverMode = !isLocalMode() && !DEMO;
+  const banner = document.getElementById('previewBanner');
+  banner.hidden = S.serverMode;
+  if (DEMO) banner.textContent = 'גרסת הדגמה: התשובות נשמרות רק במכשיר הזה ולא נשלחות לאף אחד';
   loadOutbox();
 
   // מציגים מיד, בלי לחכות לשרת: השאלון מהביקור הקודם (אם נערך בדף הניהול), אחרת מהקובץ המוטמע
@@ -246,7 +252,7 @@ function setView(node, hue, viewName) {
 }
 
 function goHome() {
-  if (SURVEY_CLOSED || S.view === 'closed') return goClosed();
+  if ((SURVEY_CLOSED && !DEMO) || S.view === 'closed') return goClosed();
   if (hasStarted()) goCategories(); else goLanding();
 }
 
@@ -284,7 +290,8 @@ function goLanding() {
     el('div', { class: 'land-cta' },
       el('button', { class: 'btn btn-primary btn-block', onclick: () => (hasIdentity() ? goCategories() : goEmail()) }, 'מתחילים', icon('arrow-left'))
     ),
-    el('p', { class: 'land-note' }, m.sub)
+    // בהדגמה אין שרת, אז גם אין המשך ממכשיר אחר
+    el('p', { class: 'land-note' }, DEMO ? 'בערך ' + (m.minutes || 10) + ' דקות. כל נושא נשמר במכשיר ברגע שמסיימים אותו.' : m.sub)
   );
   setView(view, null, 'landing');
 }
@@ -1060,8 +1067,9 @@ function showLaterModal() {
   const email = localStorage.getItem(EMAIL_KEY);
   openModal(el('div', { class: 'modal' },
     el('h3', {}, icon('bookmark'), 'ממשיכים מתי שנוח'),
-    el('p', {}, email ? 'הכול נשמר. ממשיכים מכל מכשיר עם המייל:' : 'הכול נשמר, אפשר פשוט לחזור לאתר.'),
-    email ? el('p', { class: 'email-chip', dir: 'ltr' }, email) : null,
+    // בלי שרת (הדגמה או תצוגה מקדימה) אין המשך ממכשיר אחר
+    el('p', {}, email && S.serverMode ? 'הכול נשמר. ממשיכים מכל מכשיר עם המייל:' : 'הכול נשמר במכשיר הזה, אפשר פשוט לחזור לאתר.'),
+    email && S.serverMode ? el('p', { class: 'email-chip', dir: 'ltr' }, email) : null,
     el('div', { class: 'modal-actions' },
       el('button', { class: 'btn btn-primary', onclick: closeModal }, 'הבנתי'))
   ));
@@ -1156,7 +1164,7 @@ function showRaffleModal() {
           const name = nameIn.value.trim(), phone = phoneIn.value.trim();
           if (name.length < 2) { showToast('נשמח לשם מלא', 'warning'); return; }
           if (!validPhone(phone)) { showToast('בדקו את מספר הטלפון', 'warning'); return; }
-          if (!S.serverMode) { showToast('בתצוגה המקדימה אין הרשמה. היא תיפתח כשהסקר יעלה לאוויר', 'warning', 4500); return; }
+          if (!S.serverMode) { showToast(DEMO ? 'בגרסת ההדגמה אין הרשמה להגרלה' : 'בתצוגה המקדימה אין הרשמה. היא תיפתח כשהסקר יעלה לאוויר', 'warning', 4500); return; }
           b.disabled = true;
           actions.hidden = true;
           status.replaceChildren(loadingSteps(RAFFLE_STEPS, { inline: true, slow: 'עוד רגע, כמעט שם…' }));
