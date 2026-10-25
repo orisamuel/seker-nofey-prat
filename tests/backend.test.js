@@ -436,5 +436,42 @@ check('committees: wrong password saves nothing', !post({ action: 'saveCommittee
 check('committees: a name and at least one real topic are required', !post({ action: 'saveCommittees', password: pw(), committees: [{ name: ' ', chapters: ['lib'] }] }).success && !post({ action: 'saveCommittees', password: pw(), committees: [{ name: 'x', chapters: ['nope', 'about'] }] }).success);
 delete cache.pw_fails;
 
+// ── 17. גרסת ההדגמה (demo: 1): הכול כמו בסקר, גם כשהוא סגור, על טאבים נפרדים ──
+check('demo: the real survey is still closed', get({ action: 'getSurvey' }).open === false);
+check('demo: open in the demo', get({ action: 'getSurvey', demo: '1' }).open === true);
+const tabLen2 = (n) => (SS.getSheetByName(n) ? SS.getSheetByName(n).getLastRow() : 0);
+const REAL_TABS = ['תשובות גולמי', 'מיילים', 'הגרלה'];
+const realBefore = REAL_TABS.map(tabLen2);
+const D1 = 'DEMOAAA2', D2 = 'DEMOBBB2';
+r = post({ action: 'identify', email: 'guest@other-village.org', rid: D1, demo: 1 });
+check('demo: new email', r.success && r.status === 'new', r);
+r = post({ action: 'identify', email: 'dana@example.co.il', rid: 'DEMOCCC2', demo: 1 });
+check('demo: an email from the real survey starts fresh (separate list)', r.success && r.status === 'new', r);
+// D1 עונה על "קצת עליך" ומסמן את כל השאר כלא רלוונטי, ואז נרשם להגרלה
+const demoAbout = { about_age: '36–45', about_seniority: '3–5 שנים', about_housing: 'בית קבע', about_kids: ['אין ילדים בבית'] };
+check('demo: submit', post({ action: 'submitChapter', rid: D1, chapter: 'about', answers: demoAbout, demo: 1 }).success);
+ctx.publicSurvey().chapters.filter(c => c.id !== 'about' && ctx.evalCond(c.showIf, demoAbout))
+  .forEach(c => post({ action: 'submitChapter', rid: D1, chapter: c.id, answers: { _skipped: 'כן' }, demo: 1 }));
+r = post({ action: 'enterRaffle', rid: D1, name: 'אורח מיישוב אחר', phone: '0501234567', demo: 1 });
+check('demo: raffle registration works like the real one', r.success, r);
+r = post({ action: 'enterRaffle', rid: D1, name: 'אורח מיישוב אחר', phone: '050-1234567', demo: 1 });
+check('demo: the same phone twice is caught, like the real one', !r.success && /כבר רשום/.test(r.message), r);
+r = post({ action: 'enterRaffle', rid: D2, name: 'מישהו', phone: '0507654321', demo: 1 });
+check('demo: raffle still checks that everything was answered', !r.success, r);
+r = post({ action: 'identify', email: 'Guest@Other-Village.org', rid: 'DEMODDD2', demo: 1 });
+check('demo: the same email on another device resumes', r.success && r.status === 'resume' && r.rid === D1 && !!r.done.about, r);
+r = post({ action: 'savedTopics', rid: D1, demo: 1 });
+check('demo: saved topics come from the demo tabs', r.success && r.chapters.includes('about') && r.email === true, r);
+check('demo: restart works', post({ action: 'discard', rid: D1, demo: 1 }).success);
+check('demo: nothing reached the real tabs', JSON.stringify(REAL_TABS.map(tabLen2)) === JSON.stringify(realBefore), [realBefore, REAL_TABS.map(tabLen2)]);
+check('demo: everything is in its own tabs', REAL_TABS.every(n => tabLen2('הדגמה: ' + n) > 1) && tabLen2('הדגמה: הגרלה') === 2);
+// מחוץ לפעולות הסקר הדגל לא עושה כלום
+r = post({ action: 'getResults', password: pw(), demo: 1 });
+check('demo flag ignored by the dashboard', r.success && !r.rows.some(x => /^DEMO/.test(x.rid)) && r.raffleCount === realBefore[2] - 1, r.message || r.raffleCount);
+r = post({ action: 'refreshResults', password: pw(), demo: 1 });
+check('demo flag ignored when the results tab is built', r.success && !JSON.stringify(SS.getSheetByName('תוצאות').rows).includes('DEMO'), r);
+check('demo flag ignored by committee links', !JSON.stringify(post({ action: 'getResults', committee: savedNoar.key, demo: 1 })).includes('DEMO'));
+check('after demo requests the real tabs are back and the real survey is closed', ctx.T_RAW === 'תשובות גולמי' && ctx.DEMO_REQUEST === false && !post({ action: 'submitChapter', rid: A, chapter: 'community', answers: { comm_belong: 3 } }).success);
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

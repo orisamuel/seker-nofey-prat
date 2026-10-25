@@ -19,11 +19,12 @@ const SHEET_ID = '1Ya4TerGGhxIcl2K5ziu6xjDssB9bAn2J2oz9Ka6xm9c';
 // שמות הטאבים
 const T_CHAPTERS = 'פרקים';
 const T_QUESTIONS = 'שאלות';
-const T_RAW = 'תשובות גולמי';
+// var: בבקשה של גרסת ההדגמה שלושת אלה מוחלפים בטאבים "הדגמה: ..." (useDemoTabs, ליד הראוטר)
+var T_RAW = 'תשובות גולמי';
 const T_FLAT = 'תוצאות';
-const T_RAFFLE = 'הגרלה';
+var T_RAFFLE = 'הגרלה';
 const T_SETTINGS = 'הגדרות';
-const T_EMAILS = 'מיילים';
+var T_EMAILS = 'מיילים';
 
 // Schema: זמן(0), קוד עונה(1), פרק(2), תשובות JSON(3) — append-only
 const RAW_HEADERS = ['זמן', 'קוד עונה', 'פרק', 'תשובות (JSON)'];
@@ -146,6 +147,7 @@ function upsertSetting(sheet, key, value, note) {
 // null כשהסקר פתוח, אחרת התשובה לדפדפן. בהודעה חייבת להופיע המילה "סגור": כך הדף, גם גרסה ישנה
 // שעוד פתוחה באיזה דפדפן, יודע שאין טעם לנסות שוב (FINAL_ERROR ב-index.html)
 function closedError(settings) {
+  if (DEMO_REQUEST) return null; // גרסת ההדגמה תמיד פתוחה, והיא כותבת לטאבים משלה
   if (SURVEY_CLOSED) return { success: false, closed: true, message: 'הסקר סגור למענה. תודה לכל מי שהשתתף!' };
   if ((settings || getSettings()).surveyOpen === 'לא') return { success: false, closed: true, message: 'הסקר סגור כרגע למענה' };
   return null;
@@ -467,12 +469,14 @@ function writeNoticeSheet() {
   if (old) ss.deleteSheet(old);
   const sheet = ss.getSheetByName(T_NOTICE) || ss.insertSheet(T_NOTICE);
   sheet.clearContents();
-  sheet.getRange(1, 1, 4, 1).setValues([
+  const lines = [
     ['הגיליון הזה הוא מסד הנתונים של הסקר. לא עורכים בו.'],
     ['שאלות, טקסטים והגדרות: בדף הניהול, ' + SITE + 'admin.html'],
     ['תוצאות: בדשבורד, ' + SITE + 'dashboard.html'],
     ['כל התשובות בטבלה אחת: טאב "תוצאות", שורה לכל עונה ועמודה לכל שאלה. מתעדכן לבד כל 10 דקות, ומיד כשפותחים את הגיליון מהדשבורד.'],
-  ]);
+    ['טאבים שמתחילים ב"הדגמה:" שייכים לגרסת ההדגמה (' + SITE + 'demo). הם לא נכנסים לתוצאות, לדשבורד או לוועדות, ואפשר למחוק אותם.'],
+  ];
+  sheet.getRange(1, 1, lines.length, 1).setValues(lines);
   sheet.setColumnWidth(1, 700);
 }
 
@@ -1188,6 +1192,21 @@ function getPublicReport() {
 // GET לקריאות ציבוריות · POST (text/plain) לכתיבות ולכל מה שיש בו מידע אישי או סיסמה
 // ============================================================
 
+// ── גרסת ההדגמה ליישובים אחרים (25/10/2026) ─────────────
+// sekernofey.online/demo שולח demo: 1 בכל קריאה. פעולות הסקר הציבוריות שברשימה רצות אז בדיוק כמו בסקר,
+// גם כשהוא סגור, אבל על טאבים נפרדים: "הדגמה: תשובות גולמי", "הדגמה: מיילים", "הדגמה: הגרלה".
+// כל השאר (דשבורד, ועדות, ניהול, בניית טאב "תוצאות") מתעלם מהדגל ועובד תמיד על הנתונים האמיתיים.
+// הטאבים חוזרים לאמיתיים בסוף כל בקשה, גם כשהכול רץ באותו הקשר (השרת המדומה בבדיקות)
+const DEMO_ACTIONS = { getSurvey: 1, submitChapter: 1, discard: 1, identify: 1, savedTopics: 1, enterRaffle: 1 };
+var DEMO_REQUEST = false;
+
+function useDemoTabs(on) {
+  DEMO_REQUEST = on;
+  T_RAW = on ? 'הדגמה: תשובות גולמי' : 'תשובות גולמי';
+  T_RAFFLE = on ? 'הדגמה: הגרלה' : 'הגרלה';
+  T_EMAILS = on ? 'הדגמה: מיילים' : 'מיילים';
+}
+
 function doGet(e) { return route(e, null); }
 
 function doPost(e) {
@@ -1200,6 +1219,7 @@ function route(e, body) {
   try {
     const p = Object.assign({}, (e && e.parameter) || {}, body || {});
     const action = p.action;
+    useDemoTabs(!!p.demo && !!DEMO_ACTIONS[action]);
 
     switch (action) {
       case 'ping':
@@ -1251,5 +1271,7 @@ function route(e, body) {
     }
   } catch (err) {
     return jsonResponse({ success: false, message: err.toString() });
+  } finally {
+    useDemoTabs(false);
   }
 }

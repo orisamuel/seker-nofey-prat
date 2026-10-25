@@ -8,6 +8,24 @@
 // להבדיל מתקלת רשת שעליה מציגים הודעה כללית.
 class ServerSaid extends Error {}
 
+// ── גרסת ההדגמה (sekernofey.online/demo, 25/10/2026) ──────
+// הכול כמו בסקר האמיתי, אבל בצד: כל קריאה לשרת יוצאת עם demo: 1 והשרת כותב לטאבים "הדגמה: ...",
+// והמכשיר שומר את המפתחות עם הקידומת demo:, כדי שמי שענה על הסקר האמיתי יתחיל בהדגמה דף חדש
+const DEMO = new URLSearchParams(location.search).has('demo');
+const STORE_PREFIX = DEMO ? 'demo:' : '';
+
+const store = {
+  get: (k) => localStorage.getItem(STORE_PREFIX + k),
+  set: (k, v) => localStorage.setItem(STORE_PREFIX + k, v),
+  remove: (k) => localStorage.removeItem(STORE_PREFIX + k),
+  // המפתחות של הסקר (np_...) בלי הקידומת. בסקר האמיתי לא נכללים אלה של ההדגמה
+  keys: () => Object.keys(localStorage).filter(k => k.startsWith(STORE_PREFIX + 'np_')).map(k => k.slice(STORE_PREFIX.length)),
+};
+
+function demoBody(body) {
+  return DEMO ? Object.assign({ demo: 1 }, body) : body;
+}
+
 function isLocalMode() {
   return typeof CONFIG === 'undefined' || !CONFIG.SCRIPT_URL || CONFIG.SCRIPT_URL.includes('PASTE_');
 }
@@ -44,7 +62,7 @@ async function readJson(res) {
 // קריאות ציבוריות — GET (CORS פשוט, בלי preflight)
 async function apiCall(action, params = {}) {
   if (isLocalMode()) throw new Error('SCRIPT_URL not configured');
-  const url = CONFIG.SCRIPT_URL + '?' + new URLSearchParams({ action, ...params });
+  const url = CONFIG.SCRIPT_URL + '?' + new URLSearchParams(demoBody({ action, ...params }));
   return withRetry(async () => readJson(await fetch(url, { redirect: 'follow' })));
 }
 
@@ -57,7 +75,7 @@ async function apiPost(action, payload = {}) {
     method: 'POST',
     redirect: 'follow',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action, ...payload }),
+    body: JSON.stringify(demoBody({ action, ...payload })),
   })));
 }
 
@@ -151,16 +169,16 @@ function makeRid() {
 }
 
 function getRid() {
-  let rid = localStorage.getItem(RID_KEY);
+  let rid = store.get(RID_KEY);
   if (!rid) {
     rid = makeRid();
-    localStorage.setItem(RID_KEY, rid);
+    store.set(RID_KEY, rid);
   }
   return rid;
 }
 
 function setRid(rid) {
-  localStorage.setItem(RID_KEY, rid.toUpperCase().trim());
+  store.set(RID_KEY, rid.toUpperCase().trim());
 }
 
 // ── הסקר מהשרת מול survey-data.js ─────────────────────────

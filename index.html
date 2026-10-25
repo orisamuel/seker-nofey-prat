@@ -90,10 +90,9 @@ const SYNC_TAG = '2026-10-11';
 // הסקר נסגר סופית ב-18/10/2026: מוצגת רק הודעת תודה, מיד, בלי לפנות לשרת ובלי לשלוח כלום (גם לא מה
 // שנשאר בתור במכשיר; השרת דוחה הכול בכל מקרה, SURVEY_CLOSED ב-appscript.gs). לסקר של שנה הבאה: false בשניהם
 const SURVEY_CLOSED = true;
-// גרסת הדגמה ליישובים אחרים (25/10/2026): sekernofey.online/demo, שמעביר ל-/?demo. הסקר המלא בלי שרת:
-// שום דבר לא נשלח, והתשובות נשמרות רק במכשיר. הסקר האמיתי נשאר סגור, כדי שתשובות של משחק לא ייכנסו
-// לנתונים של נופי פרת ולדשבורדים של הוועדות
-const DEMO = new URLSearchParams(location.search).has('demo');
+// גרסת ההדגמה ליישובים אחרים (25/10/2026, DEMO ב-utils.js): sekernofey.online/demo, שמעביר ל-/?demo.
+// הסקר פתוח ועובד בדיוק כמו המקור, מול השרת, אבל השרת כותב לטאבים "הדגמה: ..." והמכשיר שומר בנפרד.
+// הסקר האמיתי נשאר סגור, כדי שתשובות של משחק לא ייכנסו לנתונים של נופי פרת ולדשבורדים של הוועדות
 
 init();
 
@@ -105,13 +104,11 @@ async function init() {
     return goClosed();
   }
   resetIfNewVersion();
-  S.done = JSON.parse(localStorage.getItem(DONE_KEY) || '{}');
-  S.remote = JSON.parse(localStorage.getItem(REMOTE_KEY) || '{}');
-  S.raffleEntered = localStorage.getItem(RAFFLE_KEY) === 'yes';
-  S.serverMode = !isLocalMode() && !DEMO;
-  const banner = document.getElementById('previewBanner');
-  banner.hidden = S.serverMode;
-  if (DEMO) banner.textContent = 'גרסת הדגמה: התשובות נשמרות רק במכשיר הזה ולא נשלחות לאף אחד';
+  S.done = JSON.parse(store.get(DONE_KEY) || '{}');
+  S.remote = JSON.parse(store.get(REMOTE_KEY) || '{}');
+  S.raffleEntered = store.get(RAFFLE_KEY) === 'yes';
+  S.serverMode = !isLocalMode();
+  document.getElementById('previewBanner').hidden = S.serverMode;
   loadOutbox();
 
   // מציגים מיד, בלי לחכות לשרת: השאלון מהביקור הקודם (אם נערך בדף הניהול), אחרת מהקובץ המוטמע
@@ -121,7 +118,7 @@ async function init() {
 
   if (!S.serverMode) return;
   flush(); // מה שלא הספיק להישלח בביקור הקודם
-  if (localStorage.getItem(SYNC_KEY) !== SYNC_TAG) setTimeout(reconcile, 2500);
+  if (store.get(SYNC_KEY) !== SYNC_TAG) setTimeout(reconcile, 2500);
   window.addEventListener('online', flush);
   window.addEventListener('pagehide', beaconOutbox);
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') flush(); else beaconOutbox(); });
@@ -130,7 +127,7 @@ async function init() {
     if (res.open === false) return goClosed();
     if (res.success && res.survey && res.survey.chapters && res.survey.chapters.length) {
       const next = mergeSurvey(res.survey, window.SURVEY_DATA, res.legacy);
-      try { localStorage.setItem(SURVEY_KEY, JSON.stringify(res.legacy ? null : next)); } catch (e) { /* מקום */ }
+      try { store.set(SURVEY_KEY, JSON.stringify(res.legacy ? null : next)); } catch (e) { /* מקום */ }
       // מציירים מחדש רק אם משהו השתנה, ובאמצע נושא לא, כדי לא לקטוע הקלדה
       if (JSON.stringify(next) === JSON.stringify(S.survey)) return;
       S.survey = next;
@@ -143,7 +140,7 @@ async function init() {
 // השאלון כפי שהגיע מהשרת בביקור הקודם (רק אחרי שנשמר בדף הניהול; לפני כן הקוד הוא המקור)
 function cachedSurvey() {
   try {
-    const s = JSON.parse(localStorage.getItem(SURVEY_KEY) || 'null');
+    const s = JSON.parse(store.get(SURVEY_KEY) || 'null');
     return s && Array.isArray(s.chapters) && s.chapters.length ? s : null;
   } catch (e) { return null; }
 }
@@ -151,9 +148,9 @@ function cachedSurvey() {
 // שאלון חדש = התחלה נקייה. טיוטות מגרסה קודמת (למשל של מי שבדק את הסקר מראש) נמחקות.
 function resetIfNewVersion() {
   const ver = String((window.SURVEY_DATA.meta || {}).version || '1');
-  if (localStorage.getItem(VER_KEY) === ver) return;
-  Object.keys(localStorage).filter(k => k.startsWith('np_')).forEach(k => localStorage.removeItem(k));
-  localStorage.setItem(VER_KEY, ver);
+  if (store.get(VER_KEY) === ver) return;
+  store.keys().filter(k => k.startsWith('np_')).forEach(k => store.remove(k));
+  store.set(VER_KEY, ver);
 }
 
 // בסרגל העליון נשאר רק השם (body.closed ב-styles.css): אין מה להמשיך ואין על מה לשאול
@@ -173,20 +170,20 @@ function goClosed() {
 // ── עזרי מצב ─────────────────────────────────────────────
 
 function getDraft(chId) {
-  try { return JSON.parse(localStorage.getItem(draftKey(chId)) || '{}'); }
+  try { return JSON.parse(store.get(draftKey(chId)) || '{}'); }
   catch { return {}; }
 }
 
 function setDraft(chId, answers) {
-  localStorage.setItem(draftKey(chId), JSON.stringify(answers));
+  store.set(draftKey(chId), JSON.stringify(answers));
 }
 
 function hasIdentity() {
-  return !!localStorage.getItem(EMAIL_KEY);
+  return !!store.get(EMAIL_KEY);
 }
 
 function saveRemote() {
-  localStorage.setItem(REMOTE_KEY, JSON.stringify(S.remote));
+  store.set(REMOTE_KEY, JSON.stringify(S.remote));
 }
 
 function allAnswers() {
@@ -290,8 +287,7 @@ function goLanding() {
     el('div', { class: 'land-cta' },
       el('button', { class: 'btn btn-primary btn-block', onclick: () => (hasIdentity() ? goCategories() : goEmail()) }, 'מתחילים', icon('arrow-left'))
     ),
-    // בהדגמה אין שרת, אז גם אין המשך ממכשיר אחר
-    el('p', { class: 'land-note' }, DEMO ? 'בערך ' + (m.minutes || 10) + ' דקות. כל נושא נשמר במכשיר ברגע שמסיימים אותו.' : m.sub)
+    el('p', { class: 'land-note' }, m.sub)
   );
   setView(view, null, 'landing');
 }
@@ -850,7 +846,7 @@ function submitChapter(ch) {
   enqueue({ type: 'submit', chapter: ch.id, answers: visAns });
   setDraft(ch.id, visAns);
   S.done[ch.id] = new Date().toISOString();
-  localStorage.setItem(DONE_KEY, JSON.stringify(S.done));
+  store.set(DONE_KEY, JSON.stringify(S.done));
   if (ch.id in S.remote) { delete S.remote[ch.id]; saveRemote(); }
   afterChapterDone(ch, false);
 }
@@ -860,7 +856,7 @@ function skipChapter(ch) {
   enqueue({ type: 'submit', chapter: ch.id, answers: { _skipped: 'כן' } });
   setDraft(ch.id, { _skipped: 'כן' });
   S.done[ch.id] = new Date().toISOString();
-  localStorage.setItem(DONE_KEY, JSON.stringify(S.done));
+  store.set(DONE_KEY, JSON.stringify(S.done));
   if (ch.id in S.remote) { delete S.remote[ch.id]; saveRemote(); }
   afterChapterDone(ch, true);
 }
@@ -924,7 +920,7 @@ function goEmail() {
 function submitEmail(input) {
   const email = input.value.trim();
   if (!validEmail(email)) { showToast('בדקו את כתובת המייל', 'warning'); input.focus(); return; }
-  localStorage.setItem(EMAIL_KEY, email);
+  store.set(EMAIL_KEY, email);
   enqueue({ type: 'identify', email });
   goCategories(); // קודם רואים את כל הנושאים
 }
@@ -935,11 +931,11 @@ function submitEmail(input) {
 // כל פעולה זוכרת את קוד העונה שלה; אם המייל התגלה כשייך לסקר ממכשיר אחר, הפעולות עוברות אליו.
 
 function loadOutbox() {
-  try { Q.items = JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]'); } catch { Q.items = []; }
+  try { Q.items = JSON.parse(store.get(OUTBOX_KEY) || '[]'); } catch { Q.items = []; }
 }
 
 function saveOutbox() {
-  localStorage.setItem(OUTBOX_KEY, JSON.stringify(Q.items));
+  store.set(OUTBOX_KEY, JSON.stringify(Q.items));
 }
 
 function enqueue(op) {
@@ -1010,7 +1006,7 @@ async function reconcile() {
   if (!res || !res.success) return;
   if (!res.discarded) {
     const have = new Set(res.chapters || []);
-    const email = localStorage.getItem(EMAIL_KEY);
+    const email = store.get(EMAIL_KEY);
     if (!res.email && email) enqueue({ type: 'identify', email });
     Object.keys(S.done).forEach(chId => {
       if (have.has(chId) || chId in S.remote) return; // נשמר ממכשיר אחר: התשובות בשרת, לא כאן
@@ -1018,7 +1014,7 @@ async function reconcile() {
       if (Object.keys(d).length) enqueue({ type: 'submit', chapter: chId, answers: d });
     });
   }
-  localStorage.setItem(SYNC_KEY, SYNC_TAG);
+  store.set(SYNC_KEY, SYNC_TAG);
 }
 
 // סוגרים את הדף באמצע שמירה: שולחים את התור גם בדרך שלא מחכה לתשובה. התור נשאר ויישלח שוב בכניסה הבאה
@@ -1027,7 +1023,7 @@ function beaconOutbox() {
   if (!S.serverMode || !Q.items.length || !navigator.sendBeacon) return;
   for (const op of Q.items) {
     if (!op.beaconed) {
-      navigator.sendBeacon(CONFIG.SCRIPT_URL, new Blob([JSON.stringify(opBody(op))], { type: 'text/plain;charset=UTF-8' }));
+      navigator.sendBeacon(CONFIG.SCRIPT_URL, new Blob([JSON.stringify(demoBody(opBody(op)))], { type: 'text/plain;charset=UTF-8' }));
       op.beaconed = true;
     }
     if (op.type === 'identify') break;
@@ -1054,7 +1050,7 @@ function mergeResume(localRid, res) {
     }
     added++;
   }
-  localStorage.setItem(DONE_KEY, JSON.stringify(S.done));
+  store.set(DONE_KEY, JSON.stringify(S.done));
   saveRemote();
   if (!added) return;
   showToast('ברוכים השבים! ' + (added === 1 ? 'נושא אחד כבר שמור' : added + ' נושאים כבר שמורים'), 'success', 3500);
@@ -1064,10 +1060,10 @@ function mergeResume(localRid, res) {
 
 // "אמשיך אחר כך": אין מה לשלוח. כל נושא כבר שמור, וממשיכים מכל מכשיר עם אותו מייל
 function showLaterModal() {
-  const email = localStorage.getItem(EMAIL_KEY);
+  const email = store.get(EMAIL_KEY);
   openModal(el('div', { class: 'modal' },
     el('h3', {}, icon('bookmark'), 'ממשיכים מתי שנוח'),
-    // בלי שרת (הדגמה או תצוגה מקדימה) אין המשך ממכשיר אחר
+    // בלי שרת (תצוגה מקדימה) אין המשך ממכשיר אחר
     el('p', {}, email && S.serverMode ? 'הכול נשמר. ממשיכים מכל מכשיר עם המייל:' : 'הכול נשמר במכשיר הזה, אפשר פשוט לחזור לאתר.'),
     email && S.serverMode ? el('p', { class: 'email-chip', dir: 'ltr' }, email) : null,
     el('div', { class: 'modal-actions' },
@@ -1104,9 +1100,9 @@ function restartAll() {
 
 // מוחק את כל מה שבמכשיר (כולל המייל) ומתחיל עם קוד עונה חדש
 function clearLocal() {
-  Object.keys(localStorage)
+  store.keys()
     .filter(k => k.startsWith('np_') && k !== VER_KEY)
-    .forEach(k => localStorage.removeItem(k));
+    .forEach(k => store.remove(k));
   S.done = {};
   S.remote = {};
   S.raffleEntered = false;
@@ -1164,7 +1160,7 @@ function showRaffleModal() {
           const name = nameIn.value.trim(), phone = phoneIn.value.trim();
           if (name.length < 2) { showToast('נשמח לשם מלא', 'warning'); return; }
           if (!validPhone(phone)) { showToast('בדקו את מספר הטלפון', 'warning'); return; }
-          if (!S.serverMode) { showToast(DEMO ? 'בגרסת ההדגמה אין הרשמה להגרלה' : 'בתצוגה המקדימה אין הרשמה. היא תיפתח כשהסקר יעלה לאוויר', 'warning', 4500); return; }
+          if (!S.serverMode) { showToast('בתצוגה המקדימה אין הרשמה. היא תיפתח כשהסקר יעלה לאוויר', 'warning', 4500); return; }
           b.disabled = true;
           actions.hidden = true;
           status.replaceChildren(loadingSteps(RAFFLE_STEPS, { inline: true, slow: 'עוד רגע, כמעט שם…' }));
@@ -1177,7 +1173,7 @@ function showRaffleModal() {
             // ניסיון חוזר אחרי שההרשמה הראשונה כבר נקלטה מחזיר "כבר רשום": זו הצלחה
             if (!res.success && !(res.retried && /כבר רשום/.test(res.message || ''))) throw new ServerSaid(res.message);
             S.raffleEntered = true;
-            localStorage.setItem(RAFFLE_KEY, 'yes');
+            store.set(RAFFLE_KEY, 'yes');
             closeModal();
             showToast('נרשמתם, בהצלחה! 🎉', 'success', 5000);
             goCategories();
